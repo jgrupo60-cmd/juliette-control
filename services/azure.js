@@ -4,6 +4,14 @@ export async function startVirtualMachine() {
   return apiRequest('/api/vm/start', { method: 'POST', body: '{}' });
 }
 
+export async function stopVirtualMachine() {
+  return apiRequest('/api/vm/stop', { method: 'POST', body: '{}' });
+}
+
+export async function restartVirtualMachine() {
+  return apiRequest('/api/vm/restart', { method: 'POST', body: '{}' });
+}
+
 export async function fetchVirtualMachineStatus() {
   return apiRequest('/api/vm/status');
 }

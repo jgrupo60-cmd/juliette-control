@@ -3,7 +3,7 @@
 Endpoints:
 - GET  /api/health
 - GET  /api/vm/status
-- POST /api/vm/start (Bearer token required)
+- POST /api/vm/start, /api/vm/stop and /api/vm/restart (Bearer token required)
 
 The Function App authenticates to Azure with its system-assigned managed
 identity. No Azure client secret is stored in this project.
@@ -24,7 +24,7 @@ from azure.core.exceptions import AzureError, ClientAuthenticationError, HttpRes
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.compute import ComputeManagementClient
 
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.6.0"
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 
@@ -268,4 +268,111 @@ def vm_start(req: func.HttpRequest) -> func.HttpResponse:
         return _json(req, {"error": "AZURE_UNAVAILABLE"}, 502, request_id=request_id)
     except Exception:
         logging.exception("Unexpected VM start failure request_id=%s", request_id)
+        return _json(req, {"error": "INTERNAL_ERROR"}, 500, request_id=request_id)
+
+
+@app.route(route="vm/stop", methods=["POST", "OPTIONS"])
+def vm_stop(req: func.HttpRequest) -> func.HttpResponse:
+    if response := _preflight_or_reject_origin(req):
+        return response
+
+    request_id = str(uuid.uuid4())
+    try:
+        if not _authorized(req):
+            return _json(req, {"error": "UNAUTHORIZED"}, 401, request_id=request_id)
+
+        group, name = _vm_settings()
+        client = _client()
+        current = _power_state(client.virtual_machines.instance_view(group, name).statuses)
+
+        if current in {"deallocated", "stopped"}:
+            return _json(
+                req,
+                {"ok": True, "powerState": current, "message": "Juliette ya está apagada."},
+                request_id=request_id,
+            )
+        if current in {"stopping", "deallocating"}:
+            return _json(
+                req,
+                {"ok": True, "powerState": current, "message": "Juliette ya se está apagando."},
+                202,
+                request_id=request_id,
+            )
+        if current == "starting":
+            return _json(
+                req,
+                {"ok": False, "powerState": current, "message": "Espera a que finalice el inicio antes de apagar."},
+                409,
+                request_id=request_id,
+            )
+
+        client.virtual_machines.begin_deallocate(group, name)
+        logging.info("VM deallocate accepted for %s/%s request_id=%s", group, name, request_id)
+        return _json(
+            req,
+            {"ok": True, "powerState": "deallocating", "message": "Azure aceptó la solicitud de apagado y desasignación.", "requestedAt": _utc_now()},
+            202,
+            request_id=request_id,
+        )
+    except RuntimeError as exc:
+        logging.exception("Azure Bridge configuration error request_id=%s", request_id)
+        return _json(req, {"error": "BRIDGE_NOT_CONFIGURED", "detail": str(exc)}, 503, request_id=request_id)
+    except ClientAuthenticationError:
+        logging.exception("Managed identity authentication failed request_id=%s", request_id)
+        return _json(req, {"error": "AZURE_AUTH_FAILED"}, 502, request_id=request_id)
+    except HttpResponseError as exc:
+        logging.exception("Azure rejected VM stop request request_id=%s", request_id)
+        return _json(req, {"error": "AZURE_STOP_FAILED", "detail": _safe_http_detail(exc)}, getattr(exc, "status_code", None) or 502, request_id=request_id)
+    except AzureError:
+        logging.exception("Azure SDK failure while stopping VM request_id=%s", request_id)
+        return _json(req, {"error": "AZURE_UNAVAILABLE"}, 502, request_id=request_id)
+    except Exception:
+        logging.exception("Unexpected VM stop failure request_id=%s", request_id)
+        return _json(req, {"error": "INTERNAL_ERROR"}, 500, request_id=request_id)
+
+
+@app.route(route="vm/restart", methods=["POST", "OPTIONS"])
+def vm_restart(req: func.HttpRequest) -> func.HttpResponse:
+    if response := _preflight_or_reject_origin(req):
+        return response
+
+    request_id = str(uuid.uuid4())
+    try:
+        if not _authorized(req):
+            return _json(req, {"error": "UNAUTHORIZED"}, 401, request_id=request_id)
+
+        group, name = _vm_settings()
+        client = _client()
+        current = _power_state(client.virtual_machines.instance_view(group, name).statuses)
+
+        if current != "running":
+            return _json(
+                req,
+                {"ok": False, "powerState": current, "message": "La VM debe estar encendida para reiniciarla."},
+                409,
+                request_id=request_id,
+            )
+
+        client.virtual_machines.begin_restart(group, name)
+        logging.info("VM restart accepted for %s/%s request_id=%s", group, name, request_id)
+        return _json(
+            req,
+            {"ok": True, "powerState": "restarting", "message": "Azure aceptó la solicitud de reinicio.", "requestedAt": _utc_now()},
+            202,
+            request_id=request_id,
+        )
+    except RuntimeError as exc:
+        logging.exception("Azure Bridge configuration error request_id=%s", request_id)
+        return _json(req, {"error": "BRIDGE_NOT_CONFIGURED", "detail": str(exc)}, 503, request_id=request_id)
+    except ClientAuthenticationError:
+        logging.exception("Managed identity authentication failed request_id=%s", request_id)
+        return _json(req, {"error": "AZURE_AUTH_FAILED"}, 502, request_id=request_id)
+    except HttpResponseError as exc:
+        logging.exception("Azure rejected VM restart request request_id=%s", request_id)
+        return _json(req, {"error": "AZURE_RESTART_FAILED", "detail": _safe_http_detail(exc)}, getattr(exc, "status_code", None) or 502, request_id=request_id)
+    except AzureError:
+        logging.exception("Azure SDK failure while restarting VM request_id=%s", request_id)
+        return _json(req, {"error": "AZURE_UNAVAILABLE"}, 502, request_id=request_id)
+    except Exception:
+        logging.exception("Unexpected VM restart failure request_id=%s", request_id)
         return _json(req, {"error": "INTERNAL_ERROR"}, 500, request_id=request_id)

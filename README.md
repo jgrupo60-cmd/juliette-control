@@ -23,3 +23,28 @@ git push origin main
 ```
 
 No subas `CONTROL_ACCESS_TOKEN` al repositorio.
+
+## PR-006 · Mission Control
+
+- Nuevo dashboard operativo compacto con navegación lateral.
+- Estado real de Azure VM y Azure Bridge.
+- Controles protegidos para encender, reiniciar y apagar/desasignar la VM.
+- Endpoints nuevos: `POST /api/vm/restart` y `POST /api/vm/stop`.
+- Registro local de operaciones por navegador.
+- Acceso inteligente al Dashboard solo cuando la VM está encendida.
+
+### Publicación del backend
+
+Desde `api` con el entorno Python 3.11 activo:
+
+```powershell
+func azure functionapp publish juliette-control-api --python --build remote
+```
+
+Después publica el frontend con GitHub Pages:
+
+```powershell
+git add .
+git commit -m "PR-006: Mission Control and VM operations"
+git push origin main
+```
