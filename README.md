@@ -1,52 +1,77 @@
-# Juliette Control Center
+# Juliette Control Center — PR-004
 
-Panel remoto para consultar y encender `kyodobot-server` aunque la VM principal esté apagada.
+PR-004 convierte Azure Bridge en una integración desplegable y conecta el frontend con la URL real de Azure Functions. El despliegue incluye validaciones estrictas para sesión, suscripción, Function App, variables de entorno, CORS y publicación.
 
-## PR-003 — Azure Bridge
+## Incluye
 
-Incluye:
+- `GET /api/health`
+- `GET /api/vm/status`
+- `POST /api/vm/start`
+- Managed Identity mediante `DefaultAzureCredential`
+- Bearer token temporal para acciones de escritura
+- CORS limitado al origen configurado
+- polling de estado en el dashboard
+- manejo de errores y `requestId`
+- script PowerShell para publicar y actualizar `config/app.js`
 
-- Azure Function en Python con identidad administrada.
-- `GET /api/health`.
-- `GET /api/vm/status` usando Instance View.
-- `POST /api/vm/start` usando la operación Start de Azure Compute.
-- CORS restringido a GitHub Pages.
-- Código temporal del staff conservado solo en `sessionStorage`.
-- Estado real, refresco manual y consulta automática cada 15 segundos.
-- Estados `running`, `starting`, `deallocated`, `stopped` y transitorios.
-- Sin credenciales de Azure en el repositorio.
+## Requisitos ya preparados
 
-## Estructura de la API
+- Function App: `juliette-control-api`
+- Resource Group de la Function: `JULIETTE-CONTROL`
+- Identidad administrada activada
+- rol `Colaborador de la máquina virtual` sobre `kyodobot-server`
+- variables de entorno:
+  - `AZURE_SUBSCRIPTION_ID`
+  - `AZURE_RESOURCE_GROUP`
+  - `AZURE_VM_NAME`
+  - `AZURE_VM_RESOURCE_ID`
+  - `ALLOWED_ORIGINS`
+  - `CONTROL_ACCESS_TOKEN`
 
-```text
-api/
-├── function_app.py
-├── host.json
-├── requirements.txt
-├── local.settings.example.json
-└── tests/
+`AZURE_VM_RESOURCE_ID` queda disponible para próximas operaciones, aunque PR-004 usa grupo y nombre con el SDK de Compute.
+
+## Despliegue
+
+Desde la raíz del repositorio, en PowerShell:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\deploy-pr004.ps1
 ```
 
-## Seguridad del PR-003
+El script:
 
-La Function usa una identidad administrada para hablar con Azure. El endpoint de encendido requiere temporalmente un secreto compartido mediante `Authorization: Bearer ...`. Ese secreto:
+1. comprueba Azure CLI y Functions Core Tools;
+2. usa la sesión activa de Azure o abre `az login`;
+3. selecciona explícitamente `Azure for Students`;
+4. verifica que exista la Function App y que estén las seis variables requeridas;
+5. configura CORS de forma idempotente;
+6. publica `api/` con compilación remota;
+7. obtiene nuevamente el hostname y actualiza `config/app.js`.
 
-- no se guarda en GitHub;
-- no se escribe en el JavaScript;
-- solo vive durante la pestaña del navegador;
-- será reemplazado por autenticación individual en PR-004.
+## Prueba segura
 
-## Configuración pendiente después de subir el código
+```powershell
+.\scripts\test-pr004.ps1
+```
 
-1. Crear una Function App Python.
-2. Activar su identidad administrada.
-3. Asignarle un rol personalizado limitado a leer/iniciar `kyodobot-server`.
-4. Crear los App Settings indicados en `api/local.settings.example.json`.
-5. Desplegar la carpeta `api`.
-6. Pegar la URL HTTPS de la Function en `config/app.js`.
+Este script prueba salud y estado, pero no enciende la VM.
 
-## Frontend
+Para probar el encendido desde la web, abre el Control Center, pulsa **Encender servidor** e ingresa el valor de `CONTROL_ACCESS_TOKEN`. El token se guarda únicamente en `sessionStorage` y se elimina al cerrar la pestaña.
 
-GitHub Pages:
+## GitHub Pages
 
-`https://jgrupo60-cmd.github.io/juliette-control/`
+Después del despliegue y las pruebas:
+
+```powershell
+git add .
+git commit -m "PR-004: deploy Azure Bridge and connect production frontend"
+git push origin main
+```
+
+No subas `local.settings.json`, `.venv` ni el token del staff.
+
+
+## Corrección del despliegue
+
+El script corregido no intenta leer propiedades de una respuesta vacía. Cada llamada a Azure CLI comprueba su código de salida, valida JSON y detiene el proceso con un mensaje concreto cuando falta sesión, recurso o configuración. Los mensajes del script usan texto ASCII para evitar caracteres dañados en Windows PowerShell 5.1.

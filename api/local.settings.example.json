@@ -3,11 +3,11 @@
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "python",
-    "AZURE_SUBSCRIPTION_ID": "REEMPLAZAR",
+    "AZURE_SUBSCRIPTION_ID": "replace-me",
     "AZURE_RESOURCE_GROUP": "KYODOBOT-VM",
     "AZURE_VM_NAME": "kyodobot-server",
-    "AZURE_VM_REGION": "North Central US",
-    "ALLOWED_ORIGINS": "https://jgrupo60-cmd.github.io",
-    "CONTROL_ACCESS_TOKEN": "GENERAR_UN_SECRETO_LARGO"
+    "AZURE_VM_RESOURCE_ID": "/subscriptions/.../resourceGroups/KYODOBOT-VM/providers/Microsoft.Compute/virtualMachines/kyodobot-server",
+    "ALLOWED_ORIGINS": "http://localhost:5500,https://jgrupo60-cmd.github.io",
+    "CONTROL_ACCESS_TOKEN": "replace-me"
   }
 }

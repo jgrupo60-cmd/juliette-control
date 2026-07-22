@@ -96,8 +96,10 @@ async function refreshStatus({ quiet = false } = {}) {
 function humanizeError(error) {
   if (error.message === 'API_NOT_CONFIGURED') return 'Falta pegar la URL HTTPS de Azure Functions.';
   if (error.message === 'API_TIMEOUT') return 'Azure Bridge demoró demasiado en responder.';
+  if (error.message === 'API_UNREACHABLE') return 'No fue posible conectar con Azure Bridge. Revisa la URL, CORS o el despliegue.';
   if (error.status === 401) return 'El código del staff no es válido.';
   if (error.status === 403) return 'La identidad de la Function no tiene permisos sobre la VM.';
+  if (error.payload?.detail) return error.payload.detail;
   return 'Revisa la Function App y vuelve a intentarlo.';
 }
 
@@ -110,7 +112,7 @@ async function executeStart() {
     showToast('Inicio solicitado', result.message || 'Azure aceptó la solicitud de encendido.');
     latestStatus = { ...(latestStatus || {}), powerState: result.powerState || 'starting', checkedAt: new Date().toISOString(), apiConfigured: true };
     renderStatus(latestStatus);
-    window.setTimeout(() => refreshStatus({ quiet: true }), 5000);
+    window.setTimeout(() => refreshStatus({ quiet: true }), APP_CONFIG.startPollMs || 5000);
   } catch (error) {
     if (error.status === 401) {
       setAccessToken('');

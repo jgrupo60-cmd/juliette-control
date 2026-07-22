@@ -27,7 +27,7 @@ export async function apiRequest(path, options = {}) {
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 15000);
+  const timeout = window.setTimeout(() => controller.abort(), APP_CONFIG.apiTimeoutMs || 20000);
 
   try {
     const response = await fetch(`${APP_CONFIG.apiBaseUrl}${path}`, {
@@ -35,6 +35,7 @@ export async function apiRequest(path, options = {}) {
       headers,
       signal: controller.signal,
       cache: 'no-store',
+      mode: 'cors',
     });
 
     let payload = {};
@@ -49,6 +50,7 @@ export async function apiRequest(path, options = {}) {
     return payload;
   } catch (error) {
     if (error.name === 'AbortError') throw new Error('API_TIMEOUT');
+    if (error instanceof TypeError) throw new Error('API_UNREACHABLE');
     throw error;
   } finally {
     window.clearTimeout(timeout);
