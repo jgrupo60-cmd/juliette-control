@@ -1,53 +1,52 @@
 # Juliette Control Center
 
-Panel independiente para operar Juliette/KyodoBot aunque la VM principal esté apagada.
+Panel remoto para consultar y encender `kyodobot-server` aunque la VM principal esté apagada.
 
-## PR-002 — Application Architecture
+## PR-003 — Azure Bridge
 
-Este bloque transforma la landing inicial en una aplicación estática modular preparada para crecer.
+Incluye:
 
-### Incluye
+- Azure Function en Python con identidad administrada.
+- `GET /api/health`.
+- `GET /api/vm/status` usando Instance View.
+- `POST /api/vm/start` usando la operación Start de Azure Compute.
+- CORS restringido a GitHub Pages.
+- Código temporal del staff conservado solo en `sessionStorage`.
+- Estado real, refresco manual y consulta automática cada 15 segundos.
+- Estados `running`, `starting`, `deallocated`, `stopped` y transitorios.
+- Sin credenciales de Azure en el repositorio.
 
-- Landing renovada.
-- Dashboard independiente.
-- Pantalla de acceso demostrativa.
-- Sidebar responsive.
-- Componentes reutilizables de navegación y notificaciones.
-- Servicios separados para estado, autenticación, API y Azure.
-- Configuración centralizada.
-- Preparación del botón de encendido para una API real.
-
-### Estructura
+## Estructura de la API
 
 ```text
-index.html
-login.html
-dashboard.html
-assets/
-  css/
-  js/
-components/
-services/
-config/
+api/
+├── function_app.py
+├── host.json
+├── requirements.txt
+├── local.settings.example.json
+└── tests/
 ```
 
-## Publicación
+## Seguridad del PR-003
+
+La Function usa una identidad administrada para hablar con Azure. El endpoint de encendido requiere temporalmente un secreto compartido mediante `Authorization: Bearer ...`. Ese secreto:
+
+- no se guarda en GitHub;
+- no se escribe en el JavaScript;
+- solo vive durante la pestaña del navegador;
+- será reemplazado por autenticación individual en PR-004.
+
+## Configuración pendiente después de subir el código
+
+1. Crear una Function App Python.
+2. Activar su identidad administrada.
+3. Asignarle un rol personalizado limitado a leer/iniciar `kyodobot-server`.
+4. Crear los App Settings indicados en `api/local.settings.example.json`.
+5. Desplegar la carpeta `api`.
+6. Pegar la URL HTTPS de la Function en `config/app.js`.
+
+## Frontend
 
 GitHub Pages:
 
-- Rama: `main`
-- Carpeta: `/ (root)`
-
-## Seguridad
-
-No almacenar credenciales, tokens, secretos ni claves de Azure en este repositorio público.
-
-## Próximo bloque
-
-PR-003 — Azure Bridge:
-
-- API independiente.
-- Estado real de la VM.
-- Inicio real de `kyodobot-server`.
-- CORS restringido al dominio de GitHub Pages.
-- Identidad administrada y permisos mínimos.
+`https://jgrupo60-cmd.github.io/juliette-control/`

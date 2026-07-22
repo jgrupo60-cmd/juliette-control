@@ -1,0 +1,13 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AZURE_SUBSCRIPTION_ID": "REEMPLAZAR",
+    "AZURE_RESOURCE_GROUP": "KYODOBOT-VM",
+    "AZURE_VM_NAME": "kyodobot-server",
+    "AZURE_VM_REGION": "North Central US",
+    "ALLOWED_ORIGINS": "https://jgrupo60-cmd.github.io",
+    "CONTROL_ACCESS_TOKEN": "GENERAR_UN_SECRETO_LARGO"
+  }
+}
