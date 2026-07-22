@@ -11,5 +11,5 @@ export function sidebar(){return `
     <span class="system-light" id="sidebarBridgeLight"></span>
     <div><strong id="sidebarBridgeText">Azure Bridge</strong><small id="sidebarBridgeDetail">Comprobando conexión</small></div>
   </div>
-  <div class="sidebar-footer"><strong>Mission Control</strong><small>PR-006 · v0.6.0</small></div>
+  <div class="sidebar-footer"><strong>Mission Control</strong><small>PR-009 · v0.9.0</small></div>
 </aside>`}

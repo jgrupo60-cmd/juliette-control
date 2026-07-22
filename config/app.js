@@ -1,6 +1,6 @@
 export const APP_CONFIG = Object.freeze({
   name: 'Juliette Control Center',
-  version: '0.8.0',
+  version: '0.9.0',
   environment: 'production',
   dashboardUrl: 'http://130.131.85.248:5000',
   statusPollMs: 15000,

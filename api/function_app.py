@@ -10,12 +10,14 @@ identity. No Azure client secret is stored in this project.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import hmac
 import json
 import logging
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Any
 
@@ -24,7 +26,7 @@ from azure.core.exceptions import AzureError, ClientAuthenticationError, HttpRes
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.compute import ComputeManagementClient
 
-APP_VERSION = "0.8.0"
+APP_VERSION = "0.9.0"
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 
@@ -96,13 +98,80 @@ def _preflight_or_reject_origin(req: func.HttpRequest) -> func.HttpResponse | No
     return None
 
 
-def _authorized(req: func.HttpRequest) -> bool:
-    configured = _required_setting("CONTROL_ACCESS_TOKEN")
-    supplied = req.headers.get("Authorization", "")
-    if not supplied.startswith("Bearer "):
+SESSION_TTL_HOURS = 12
+
+
+def _b64url_encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _b64url_decode(value: str) -> bytes:
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+
+def _verify_password(password: str) -> bool:
+    """Validate a password against CONTROL_LOGIN_PASSWORD_HASH.
+
+    Format: pbkdf2_sha256$iterations$salt_base64url$digest_base64url
+    """
+    configured = _required_setting("CONTROL_LOGIN_PASSWORD_HASH")
+    try:
+        algorithm, iterations_raw, salt_raw, digest_raw = configured.split("$", 3)
+        if algorithm != "pbkdf2_sha256":
+            return False
+        iterations = int(iterations_raw)
+        salt = _b64url_decode(salt_raw)
+        expected = _b64url_decode(digest_raw)
+    except (ValueError, TypeError):
+        logging.error("CONTROL_LOGIN_PASSWORD_HASH has an invalid format")
         return False
-    token = supplied.removeprefix("Bearer ").strip()
-    return bool(token) and hmac.compare_digest(token, configured)
+    actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+    return hmac.compare_digest(actual, expected)
+
+
+def _issue_session(staff: str) -> tuple[str, str]:
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(hours=SESSION_TTL_HOURS)
+    payload = {
+        "sub": staff,
+        "iat": int(now.timestamp()),
+        "exp": int(expires.timestamp()),
+        "nonce": uuid.uuid4().hex,
+    }
+    encoded = _b64url_encode(json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+    signature = hmac.new(
+        _required_setting("CONTROL_ACCESS_TOKEN").encode("utf-8"),
+        encoded.encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+    return f"{encoded}.{_b64url_encode(signature)}", expires.isoformat()
+
+
+def _session_payload(token: str) -> dict[str, Any] | None:
+    try:
+        encoded, supplied_signature = token.split(".", 1)
+        expected_signature = hmac.new(
+            _required_setting("CONTROL_ACCESS_TOKEN").encode("utf-8"),
+            encoded.encode("ascii"),
+            hashlib.sha256,
+        ).digest()
+        if not hmac.compare_digest(_b64url_decode(supplied_signature), expected_signature):
+            return None
+        payload = json.loads(_b64url_decode(encoded))
+        if int(payload.get("exp", 0)) <= int(datetime.now(timezone.utc).timestamp()):
+            return None
+        return payload
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+
+def _bearer_token(req: func.HttpRequest) -> str:
+    supplied = req.headers.get("Authorization", "")
+    return supplied.removeprefix("Bearer ").strip() if supplied.startswith("Bearer ") else ""
+
+
+def _authorized(req: func.HttpRequest) -> bool:
+    return _session_payload(_bearer_token(req)) is not None
 
 
 @lru_cache(maxsize=1)
@@ -134,6 +203,35 @@ def _safe_http_detail(exc: HttpResponseError) -> str:
     if status == 409:
         return "Azure rechazó la operación porque existe otra operación en curso."
     return "Azure rechazó la operación solicitada."
+
+
+@app.route(route="auth/login", methods=["POST", "OPTIONS"])
+def auth_login(req: func.HttpRequest) -> func.HttpResponse:
+    if response := _preflight_or_reject_origin(req):
+        return response
+    request_id = str(uuid.uuid4())
+    try:
+        body = req.get_json()
+    except ValueError:
+        body = {}
+    staff = str(body.get("staff", "Staff")).strip()[:40] or "Staff"
+    password = str(body.get("password", ""))
+    if not password or not _verify_password(password):
+        logging.warning("Rejected Control Center login request_id=%s", request_id)
+        return _json(req, {"error": "INVALID_CREDENTIALS", "detail": "Contraseña incorrecta."}, 401, request_id=request_id)
+    token, expires_at = _issue_session(staff)
+    logging.info("Control Center login accepted staff=%s request_id=%s", staff, request_id)
+    return _json(req, {"ok": True, "token": token, "staff": staff, "expiresAt": expires_at}, request_id=request_id)
+
+
+@app.route(route="auth/session", methods=["GET", "OPTIONS"])
+def auth_session(req: func.HttpRequest) -> func.HttpResponse:
+    if response := _preflight_or_reject_origin(req):
+        return response
+    payload = _session_payload(_bearer_token(req))
+    if not payload:
+        return _json(req, {"error": "UNAUTHORIZED"}, 401)
+    return _json(req, {"ok": True, "staff": payload.get("sub", "Staff"), "expiresAt": datetime.fromtimestamp(int(payload["exp"]), timezone.utc).isoformat()})
 
 
 @app.route(route="health", methods=["GET", "OPTIONS"])
@@ -385,7 +483,8 @@ def vm_restart(req: func.HttpRequest) -> func.HttpResponse:
 # intentionally protected by the same bearer token as infrastructure changes.
 
 def _staff_name(req: func.HttpRequest) -> str:
-    raw = (req.headers.get("X-Staff-Name") or "Staff").strip()
+    payload = _session_payload(_bearer_token(req))
+    raw = str((payload or {}).get("sub") or "Staff").strip()
     cleaned = "".join(ch for ch in raw if ch.isalnum() or ch in " _-.@")[:40]
     return cleaned or "Staff"
 

@@ -1,7 +1,6 @@
 import { sidebar } from '../../components/sidebar.js';
 import { topbar } from '../../components/topbar.js';
 import { toastMarkup, showToast } from '../../components/toast.js';
-import { accessModalMarkup, openAccessModal, closeAccessModal } from '../../components/access-modal.js';
 import { getStatus } from '../../services/status.js';
 import {
   startVirtualMachine,
@@ -15,11 +14,15 @@ import {
 } from '../../services/azure.js';
 import {
   getAccessToken,
-  setAccessToken,
   getStaffName,
-  setStaffName,
+  hasLocalSession,
+  verifySession,
+  clearStaffSession,
 } from '../../services/api.js';
 import { APP_CONFIG } from '../../config/app.js';
+
+if (!hasLocalSession()) window.location.replace('login.html');
+try { await verifySession(); } catch { clearStaffSession(); window.location.replace('login.html'); throw new Error('UNAUTHORIZED'); }
 
 const shell = document.getElementById('appShell');
 shell.innerHTML = `<div class="app-layout">${sidebar()}<main class="content">${topbar()}
@@ -34,7 +37,7 @@ shell.innerHTML = `<div class="app-layout">${sidebar()}<main class="content">${t
 <section class="runtime-grid"><article class="card metrics-card"><div class="section-head"><div><small>Telemetría interna</small><h2>Salud de la VM</h2></div><button class="text-button" id="runtimeRefresh">Actualizar</button></div><div class="metric-grid"><div><span>Memoria</span><strong id="memoryMetric">—</strong><meter id="memoryMeter" min="0" max="100" value="0"></meter><small id="memoryDetail">—</small></div><div><span>Disco</span><strong id="diskMetric">—</strong><meter id="diskMeter" min="0" max="100" value="0"></meter><small id="diskDetail">—</small></div><div><span>Carga 1m</span><strong id="loadMetric">—</strong><small>Promedio del sistema</small></div><div><span>Uptime</span><strong id="uptimeMetric">—</strong><small>Desde el último arranque</small></div><div><span>Git</span><strong id="gitMetric">—</strong><small id="gitDetail">—</small></div><div><span>Latencia</span><strong id="bridgeLatency">—</strong><small id="latencyQuality">Azure Bridge</small></div></div><div class="trend-wrap"><span>Disponibilidad observada en esta pestaña</span><div class="trend" id="availabilityTrend"></div></div></article>
 <article class="card deploy-card"><div class="section-head"><div><small>Operaciones</small><h2>Despliegue y diagnóstico</h2></div><span class="status status-unknown" id="staffSession">Sin sesión</span></div><p>Ejecuta el actualizador oficial y consulta logs reales sin entrar por SSH.</p><div class="deploy-actions"><button class="button button-primary" id="updateButton">Actualizar desde Git</button><button class="button button-ghost" id="logsButton">Cargar logs</button></div><pre id="logsOutput">Inicia sesión para consultar los logs protegidos.</pre></article></section>
 <section class="operations-row"><article class="card telemetry-card"><div class="section-head"><div><small>Conectividad</small><h2>Azure Bridge</h2></div><span class="status status-unknown" id="bridgeBadge">Comprobando</span></div><div class="telemetry-list"><div><span>API</span><strong>Producción</strong></div><div><span>Identidad</span><strong>Managed Identity</strong></div><div><span>Autorización</span><strong>Token + atribución</strong></div><div><span>Estado</span><strong id="bridgeSummary">—</strong></div></div></article><article class="card activity-card"><div class="section-head"><div><small>Auditoría central</small><h2>Actividad reciente</h2></div><button class="text-button" id="auditRefresh">Actualizar</button></div><div class="activity-list" id="activityList"><div class="activity-empty-compact"><span>◎</span><p>Inicia sesión para consultar la auditoría.</p></div></div></article></section>
-</main>${toastMarkup()}${accessModalMarkup()}</div>`;
+</main>${toastMarkup()}</div>`;
 
 const $ = (id) => document.getElementById(id);
 let latest = null;
@@ -60,11 +63,7 @@ const transition = (s) => ['starting','restarting','stopping','deallocating'].in
 const time = (v) => v ? new Intl.DateTimeFormat('es-CL',{hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(new Date(v)) : '—';
 const healthyContainer = (c) => c?.status === 'running' && !['unhealthy','starting'].includes(c?.health);
 
-function needSession(action) {
-  pendingAction = action;
-  if (!getAccessToken() || !getStaffName()) { openAccessModal(); return true; }
-  return false;
-}
+function needSession() { if (!getAccessToken()) { clearStaffSession(); window.location.replace('login.html'); return true; } return false; }
 function human(error) {
   if (error.status === 401) return 'Código o sesión no válidos.';
   if (error.message === 'API_TIMEOUT') return 'La operación demoró demasiado.';
@@ -170,7 +169,7 @@ async function operation(action) {
   if(needSession(action))return; if(action!=='start'&&!confirm(`¿Confirmas la operación ${action}?`))return;
   pending=true; renderVm(latest);
   try { const r=await map[action](); showToast('Operación aceptada',r.message||'Azure aceptó la solicitud.'); setTimeout(()=>fullRefresh(true),5000); await audit(); }
-  catch(e) { if(e.status===401){setAccessToken('');openAccessModal()} showToast('Operación rechazada',human(e)); }
+  catch(e) { if(e.status===401){clearStaffSession();window.location.replace('login.html')} showToast('Operación rechazada',human(e)); }
   finally { pending=false; renderVm(latest); }
 }
 
@@ -178,9 +177,8 @@ $('startButton').onclick=()=>operation('start'); $('restartButton').onclick=()=>
 $('refreshButton').onclick=()=>fullRefresh(false); $('runtimeRefresh').onclick=()=>runtime(false); $('auditRefresh').onclick=()=>{if(needSession('audit'))return;audit()};
 $('logsButton').onclick=async()=>{if(needSession('logs'))return;$('logsOutput').textContent='Consultando logs reales…';try{const r=await fetchRuntimeLogs();$('logsOutput').textContent=r.logs||'Sin salida';await audit()}catch(e){$('logsOutput').textContent=human(e)}};
 $('updateButton').onclick=async()=>{if(needSession('update'))return;if(!confirm('Esto ejecutará /opt/kyodobot/update.sh y reiniciará servicios. ¿Continuar?'))return;$('updateButton').disabled=true;$('logsOutput').textContent='Actualizando KyodoBot…';try{const r=await updateRuntime();$('logsOutput').textContent=r.output||r.message;showToast('Actualización completada',r.message);await audit();setTimeout(()=>fullRefresh(true),5000)}catch(e){$('logsOutput').textContent=human(e);showToast('Actualización fallida',human(e))}finally{$('updateButton').disabled=false}};
-$('closeAccessModal').onclick=closeAccessModal; $('cancelAccess').onclick=closeAccessModal;
-$('confirmAccess').onclick=()=>{const name=$('staffName').value.trim(),token=$('accessToken').value.trim();if(!name||!token)return showToast('Datos requeridos','Ingresa nombre y código.');setStaffName(name);setAccessToken(token);$('staffSession').textContent=name;$('staffSession').className='status status-running';closeAccessModal();const action=pendingAction;pendingAction=null;if(['start','restart','stop'].includes(action))operation(action);else if(action==='logs')$('logsButton').click();else if(action==='update')$('updateButton').click();else if(action==='audit')audit()};
-$('staffName').value=getStaffName(); if(getStaffName()){$('staffSession').textContent=getStaffName();$('staffSession').className='status status-running'}
+$('staffSession').textContent=getStaffName()||'Staff'; $('staffSession').className='status status-running';
+$('logoutButton').onclick=()=>{clearStaffSession();window.location.replace('login.html')};
 setInterval(()=>{$('pollCountdown').textContent=`${Math.max(0,Math.ceil((nextPoll-Date.now())/1000))}s`},1000);
 await fullRefresh(true); if(getAccessToken()) await audit();
 setInterval(()=>refresh(true),APP_CONFIG.statusPollMs);

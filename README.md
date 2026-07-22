@@ -59,3 +59,10 @@ Añade telemetría interna mediante Azure VM Run Command, logs remotos, ejecuci�
 ## PR-008 — Real Runtime Telemetry
 
 Telemetría de solo lectura sin sesión, estado HTTP real del Dashboard, métricas detalladas de memoria/disco, salud de contenedores, reinicios y estado Git. Las operaciones y logs continúan protegidos por token.
+
+
+## PR-009 — Password Login
+
+Mission Control now requires a backend-validated staff password. The browser receives a signed, expiring session token; the password is never stored in the repository or browser storage.
+
+Required Function App setting: `CONTROL_LOGIN_PASSWORD_HASH`. Generate it with `scripts/set-login-password.ps1`.
