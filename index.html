@@ -30,13 +30,14 @@
     </section>
     <section class="preview-grid">
       <article class="preview-card preview-main">
-        <div class="card-top"><span><small>Servidor principal</small><strong>Juliette Runtime</strong></span><span class="status status-offline">Offline</span></div>
-        <div class="preview-state"><span class="server-glyph"><i></i><i></i><i></i></span><span><small>Estado actual</small><strong>Servidor apagado</strong><em>Preparado para conectar con Azure.</em></span></div>
-        <div class="preview-meta"><span>North Central US</span><span>kyodobot-server</span><span>v0.2.0</span></div>
+        <div class="card-top"><span><small>Servidor principal</small><strong>Juliette Runtime</strong></span><span class="status status-unknown" id="landingVmBadge">Consultando</span></div>
+        <div class="preview-state"><span class="server-glyph" id="landingServerGlyph" data-state="unknown"><i></i><i></i><i></i></span><span><small>Estado actual</small><strong id="landingVmTitle">Consultando Azure…</strong><em id="landingVmDescription">Obteniendo el estado real de la VM.</em></span></div>
+        <div class="preview-meta"><span id="landingRegion">—</span><span id="landingVmName">—</span><span id="landingVersion">v0.5.0</span></div>
       </article>
-      <article class="preview-card"><small>Servicios</small><strong>3 componentes supervisados</strong><div class="mini-list"><span>Azure VM <b>Offline</b></span><span>Dashboard <b>Sin conexión</b></span><span>Juliette Bot <b>Sin conexión</b></span></div></article>
+      <article class="preview-card"><small>Servicios</small><strong>3 componentes supervisados</strong><div class="mini-list"><span>Azure VM <b id="landingVmService">Consultando</b></span><span>Dashboard <b id="landingDashboardService">—</b></span><span>Juliette Bot <b id="landingBotService">—</b></span></div></article>
     </section>
   </main>
-  <footer class="landing-footer container">Juliette Control Center · PR-002 Architecture</footer>
+  <footer class="landing-footer container">Juliette Control Center · PR-005 Live Operations</footer>
+  <script type="module" src="assets/js/landing-status.js"></script>
 </body>
 </html>
