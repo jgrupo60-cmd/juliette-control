@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b0e14">
+  <meta name="description" content="Panel remoto para Juliette y KyodoBot">
+  <title>Juliette Control Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="glow glow-a"></div><div class="glow glow-b"></div>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="#">
+        <span class="logo">J</span>
+        <span><strong>Juliette</strong><small>Control Center</small></span>
+      </a>
+      <span class="env"><i></i> Producción</span>
+    </header>
+
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Infraestructura remota</p>
+        <h1>Controla Juliette desde cualquier lugar.</h1>
+        <p class="lead">Este panel seguirá disponible aunque la máquina virtual esté apagada. El staff podrá consultar su estado e iniciar el servidor de forma segura.</p>
+      </div>
+      <span class="version">Versión <strong>0.1.0</strong></span>
+    </section>
+
+    <section class="grid">
+      <article class="card main-card">
+        <div class="heading">
+          <div><p class="kicker">Servidor principal</p><h2>Juliette Runtime</h2></div>
+          <span class="chip"><i></i> Offline</span>
+        </div>
+
+        <div class="state">
+          <div class="server-icon"><span></span><span></span><span></span></div>
+          <div>
+            <small>Estado actual</small>
+            <h3>Servidor apagado</h3>
+            <p>La conexión real con Azure se añadirá en el próximo bloque.</p>
+          </div>
+        </div>
+
+        <div class="meta">
+          <div><span>Región</span><strong>North Central US</strong></div>
+          <div><span>Máquina virtual</span><strong>kyodobot-server</strong></div>
+          <div><span>Última comprobación</span><strong id="lastChecked">Sin datos</strong></div>
+        </div>
+
+        <button id="startServerButton" type="button"><span>↗</span> Encender servidor</button>
+        <p class="note">Modo demostración: todavía no ejecuta acciones reales en Azure.</p>
+      </article>
+
+      <div class="side">
+        <article class="card">
+          <div class="heading"><div><p class="kicker">Servicios</p><h2>Disponibilidad</h2></div></div>
+          <ul class="services">
+            <li><b>VM</b><span><strong>Azure VM</strong><small>Infraestructura principal</small></span><em>Offline</em></li>
+            <li><b>DB</b><span><strong>Dashboard</strong><small>Panel administrativo</small></span><em>No disponible</em></li>
+            <li><b>BT</b><span><strong>Juliette Bot</strong><small>Conexión con Kyodo</small></span><em>No disponible</em></li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <div class="heading"><div><p class="kicker">Acceso rápido</p><h2>Herramientas</h2></div></div>
+          <div class="links">
+            <a class="disabled" href="#" tabindex="-1"><span><strong>Abrir dashboard</strong><small>Disponible cuando la VM esté online</small></span><b>→</b></a>
+            <a href="https://github.com/jgrupo60-cmd/juliette-control" target="_blank" rel="noopener"><span><strong>Ver repositorio</strong><small>Código del Control Center</small></span><b>→</b></a>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="activity">
+      <div class="heading">
+        <div><p class="kicker">Actividad</p><h2>Registro reciente</h2></div>
+        <span class="soon">Próximamente</span>
+      </div>
+      <div class="empty"><span>◎</span><div><h3>Aún no hay acciones registradas</h3><p>Cuando conectemos Azure, aquí aparecerá quién inició el servidor y a qué hora.</p></div></div>
+    </section>
+
+    <footer><span>Juliette Control Center · KyodoBot Infrastructure</span><span id="year"></span></footer>
+  </main>
+
+  <div class="toast" id="toast"><strong>Modo demostración</strong><span>La conexión con Azure se implementará en el siguiente PR.</span></div>
+  <script src="js/app.js"></script>
+</body>
+</html>
