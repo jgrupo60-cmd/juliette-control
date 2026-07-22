@@ -1,28 +1,3 @@
-export function accessModalMarkup() {
-  return `<div class="modal-backdrop" id="accessModal" hidden>
-    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="accessModalTitle">
-      <button class="modal-close" id="closeAccessModal" type="button" aria-label="Cerrar">×</button>
-      <p class="modal-kicker">Acción protegida</p>
-      <h2 id="accessModalTitle">Código del staff</h2>
-      <p>Ingresa el código temporal del Control Center. Se conserva únicamente durante esta pestaña.</p>
-      <label for="accessToken">Código de acceso</label>
-      <input id="accessToken" type="password" autocomplete="current-password" placeholder="••••••••••••">
-      <div class="modal-actions">
-        <button class="button button-ghost" id="cancelAccess" type="button">Cancelar</button>
-        <button class="button button-primary" id="confirmAccess" type="button">Continuar</button>
-      </div>
-      <small>PR-004 reemplazará este código compartido por inicio de sesión individual.</small>
-    </section>
-  </div>`;
-}
-
-export function openAccessModal() {
-  const modal = document.getElementById('accessModal');
-  modal.hidden = false;
-  document.getElementById('accessToken').focus();
-}
-
-export function closeAccessModal() {
-  const modal = document.getElementById('accessModal');
-  modal.hidden = true;
-}
+export function accessModalMarkup(){return `<div class="modal-backdrop" id="accessModal" hidden><section class="modal" role="dialog" aria-modal="true" aria-labelledby="accessModalTitle"><button class="modal-close" id="closeAccessModal" type="button" aria-label="Cerrar">×</button><p class="modal-kicker">Sesión protegida</p><h2 id="accessModalTitle">Acceso del staff</h2><p>Identifícate y usa el código temporal. El nombre quedará asociado a las operaciones de auditoría.</p><label for="staffName">Nombre del staff</label><input id="staffName" type="text" maxlength="40" autocomplete="name" placeholder="Ej. Mallory"><label for="accessToken" class="second-label">Código de acceso</label><input id="accessToken" type="password" autocomplete="current-password" placeholder="••••••••••••"><div class="modal-actions"><button class="button button-ghost" id="cancelAccess" type="button">Cancelar</button><button class="button button-primary" id="confirmAccess" type="button">Continuar</button></div><small>Esta versión atribuye acciones mediante nombre + token compartido. El inicio de sesión individual con identidad propia sigue pendiente.</small></section></div>`}
+export function openAccessModal(){const modal=document.getElementById('accessModal');modal.hidden=false;document.getElementById('staffName').focus()}
+export function closeAccessModal(){document.getElementById('accessModal').hidden=true}

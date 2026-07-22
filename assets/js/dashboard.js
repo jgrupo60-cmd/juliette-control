@@ -3,136 +3,36 @@ import { topbar } from '../../components/topbar.js';
 import { toastMarkup, showToast } from '../../components/toast.js';
 import { accessModalMarkup, openAccessModal, closeAccessModal } from '../../components/access-modal.js';
 import { getStatus } from '../../services/status.js';
-import { startVirtualMachine, stopVirtualMachine, restartVirtualMachine, fetchBridgeHealth } from '../../services/azure.js';
-import { getAccessToken, setAccessToken, isApiConfigured } from '../../services/api.js';
+import { startVirtualMachine, stopVirtualMachine, restartVirtualMachine, fetchBridgeHealth, fetchRuntimeStatus, fetchRuntimeLogs, updateRuntime, fetchAudit } from '../../services/azure.js';
+import { getAccessToken, setAccessToken, getStaffName, setStaffName, isApiConfigured } from '../../services/api.js';
 import { APP_CONFIG } from '../../config/app.js';
 
-const shell = document.getElementById('appShell');
-shell.innerHTML = `<div class="app-layout">${sidebar()}<main class="content">${topbar()}
-<section class="mission-hero" id="overview">
-  <div><p class="eyebrow">Infraestructura en vivo</p><h1>Mission Control</h1><p>Supervisa y controla la infraestructura principal de Juliette desde un solo lugar.</p></div>
-  <div class="hero-sync"><span id="heroStateDot"></span><div><small>Última sincronización</small><strong id="heroCheckedAt">—</strong></div><button class="icon-button" id="refreshButton" aria-label="Actualizar estado">↻</button></div>
-</section>
-
-<section class="mission-grid">
-  <article class="card command-card">
-    <div class="command-head"><div><small>Servidor principal</small><h2>Juliette Runtime</h2></div><span class="status status-unknown" id="vmStatusBadge">Consultando</span></div>
-    <div class="command-state"><span class="server-orb" id="runtimeIcon" data-state="unknown"><i></i><i></i><i></i></span><div><small>Estado actual</small><h3 id="runtimeTitle">Consultando Azure…</h3><p id="runtimeDescription">Obteniendo el estado real de la máquina virtual.</p></div></div>
-    <div class="command-metrics"><div><span>Región</span><strong id="region">—</strong></div><div><span>Máquina virtual</span><strong id="vmName">—</strong></div><div><span>Versión</span><strong>v${APP_CONFIG.version}</strong></div></div>
-    <div class="command-actions" id="operations">
-      <button class="button button-primary" id="startButton">Encender</button>
-      <button class="button button-ghost" id="restartButton">Reiniciar</button>
-      <button class="button button-danger" id="stopButton">Apagar</button>
-    </div>
-    <div class="live-strip"><span><i id="bridgeDot"></i><b id="bridgeState">Azure Bridge</b></span><span>Próxima consulta en <b id="pollCountdown">—</b></span></div>
-  </article>
-
-  <article class="card service-board" id="services">
-    <div class="section-head"><div><small>Estado del sistema</small><h2>Servicios</h2></div><span class="health-score" id="healthScore">0/4</span></div>
-    <div class="service-tile"><span class="service-icon">AZ</span><div><strong>Azure VM</strong><small>Compute · North Central US</small></div><em id="vmService">—</em></div>
-    <div class="service-tile"><span class="service-icon">DB</span><div><strong>Dashboard</strong><small>Puerto 5000 · Panel administrativo</small></div><em id="dashboardService">—</em></div>
-    <div class="service-tile"><span class="service-icon">BT</span><div><strong>Juliette Bot</strong><small>Telemetría interna pendiente</small></div><em id="botService">—</em></div>
-    <div class="service-tile"><span class="service-icon">BR</span><div><strong>Azure Bridge</strong><small>Functions · Managed Identity</small></div><em id="bridgeService">—</em></div>
-    <div class="quick-links"><a class="button button-ghost disabled-link" id="dashboardLink" href="${APP_CONFIG.dashboardUrl}" target="_blank" rel="noopener" aria-disabled="true">Abrir Dashboard</a><a class="button button-ghost" href="https://portal.azure.com" target="_blank" rel="noopener">Azure Portal</a></div>
-  </article>
-</section>
-
-<section class="operations-row">
-  <article class="card telemetry-card"><div class="section-head"><div><small>Conectividad</small><h2>Azure Bridge</h2></div><span class="status status-unknown" id="bridgeBadge">Comprobando</span></div><div class="telemetry-list"><div><span>API</span><strong id="apiEndpoint">Producción</strong></div><div><span>Identidad</span><strong>Managed Identity</strong></div><div><span>Autorización</span><strong>Token temporal</strong></div><div><span>Latencia</span><strong id="bridgeLatency">—</strong></div></div></article>
-  <article class="card activity-card" id="activity"><div class="section-head"><div><small>Registro local</small><h2>Actividad reciente</h2></div><button class="text-button" id="clearActivity">Limpiar</button></div><div class="activity-list" id="activityList"></div></article>
-</section>
+const shell=document.getElementById('appShell');
+shell.innerHTML=`<div class="app-layout">${sidebar()}<main class="content">${topbar()}
+<section class="mission-hero"><div><p class="eyebrow">Infraestructura en vivo</p><h1>Mission Control</h1><p>Control de Azure, Docker y despliegues de Juliette desde un solo lugar.</p></div><div class="hero-sync"><span id="heroStateDot"></span><div><small>Última sincronización</small><strong id="heroCheckedAt">—</strong></div><button class="icon-button" id="refreshButton">↻</button></div></section>
+<section class="mission-grid"><article class="card command-card"><div class="command-head"><div><small>Servidor principal</small><h2>Juliette Runtime</h2></div><span class="status status-unknown" id="vmStatusBadge">Consultando</span></div><div class="command-state"><span class="server-orb" id="runtimeIcon" data-state="unknown"><i></i><i></i><i></i></span><div><small>Estado actual</small><h3 id="runtimeTitle">Consultando Azure…</h3><p id="runtimeDescription">Obteniendo el estado real.</p></div></div><div class="command-metrics"><div><span>Región</span><strong id="region">—</strong></div><div><span>Máquina virtual</span><strong id="vmName">—</strong></div><div><span>Versión</span><strong>v${APP_CONFIG.version}</strong></div></div><div class="command-actions"><button class="button button-primary" id="startButton">Encender</button><button class="button button-ghost" id="restartButton">Reiniciar</button><button class="button button-danger" id="stopButton">Apagar</button></div><div class="live-strip"><span><i id="bridgeDot"></i><b id="bridgeState">Azure Bridge</b></span><span>Próxima consulta en <b id="pollCountdown">—</b></span></div></article>
+<article class="card service-board"><div class="section-head"><div><small>Estado del sistema</small><h2>Servicios</h2></div><span class="health-score" id="healthScore">0/4</span></div>${[['AZ','Azure VM','Compute · North Central US','vmService'],['DB','Dashboard','Contenedor kyodobot-dashboard','dashboardService'],['BT','Juliette Bot','Contenedor kyodobot','botService'],['BR','Azure Bridge','Functions · Managed Identity','bridgeService']].map(x=>`<div class="service-tile"><span class="service-icon">${x[0]}</span><div><strong>${x[1]}</strong><small>${x[2]}</small></div><em id="${x[3]}">—</em></div>`).join('')}<div class="quick-links"><a class="button button-ghost" id="dashboardLink" href="${APP_CONFIG.dashboardUrl}" target="_blank">Abrir Dashboard</a><a class="button button-ghost" href="https://portal.azure.com" target="_blank">Azure Portal</a></div></article></section>
+<section class="runtime-grid"><article class="card metrics-card"><div class="section-head"><div><small>Telemetría interna</small><h2>Salud de la VM</h2></div><button class="text-button" id="runtimeRefresh">Actualizar</button></div><div class="metric-grid"><div><span>Memoria</span><strong id="memoryMetric">—</strong><meter id="memoryMeter" min="0" max="100" value="0"></meter></div><div><span>Disco</span><strong id="diskMetric">—</strong><meter id="diskMeter" min="0" max="100" value="0"></meter></div><div><span>Carga 1m</span><strong id="loadMetric">—</strong></div><div><span>Uptime</span><strong id="uptimeMetric">—</strong></div><div><span>Git</span><strong id="gitMetric">—</strong></div><div><span>Latencia</span><strong id="bridgeLatency">—</strong></div></div><div class="trend-wrap"><span>Disponibilidad observada en esta pestaña</span><div class="trend" id="availabilityTrend"></div></div></article>
+<article class="card deploy-card"><div class="section-head"><div><small>Operaciones</small><h2>Despliegue y diagnóstico</h2></div><span class="status status-unknown" id="staffSession">Sin sesión</span></div><p>Ejecuta el actualizador oficial de KyodoBot y consulta logs recientes sin entrar por SSH.</p><div class="deploy-actions"><button class="button button-primary" id="updateButton">Actualizar desde Git</button><button class="button button-ghost" id="logsButton">Cargar logs</button></div><pre id="logsOutput">Los logs aparecerán aquí.</pre></article></section>
+<section class="operations-row"><article class="card telemetry-card"><div class="section-head"><div><small>Conectividad</small><h2>Azure Bridge</h2></div><span class="status status-unknown" id="bridgeBadge">Comprobando</span></div><div class="telemetry-list"><div><span>API</span><strong>Producción</strong></div><div><span>Identidad</span><strong>Managed Identity</strong></div><div><span>Autorización</span><strong>Token + atribución</strong></div><div><span>Estado</span><strong id="bridgeSummary">—</strong></div></div></article><article class="card activity-card"><div class="section-head"><div><small>Auditoría central</small><h2>Actividad reciente</h2></div><button class="text-button" id="auditRefresh">Actualizar</button></div><div class="activity-list" id="activityList"><div class="activity-empty-compact"><span>◎</span><p>Inicia sesión para consultar la auditoría.</p></div></div></article></section>
 </main>${toastMarkup()}${accessModalMarkup()}</div>`;
 
-const $ = (id) => document.getElementById(id);
-const els = {
-  badge:$('vmStatusBadge'), title:$('runtimeTitle'), description:$('runtimeDescription'), icon:$('runtimeIcon'),
-  region:$('region'), vmName:$('vmName'), vmService:$('vmService'), dashboardService:$('dashboardService'), botService:$('botService'),
-  bridgeService:$('bridgeService'), start:$('startButton'), restart:$('restartButton'), stop:$('stopButton'), refresh:$('refreshButton'),
-  dashboardLink:$('dashboardLink'), token:$('accessToken'), bridgeDot:$('bridgeDot'), bridgeState:$('bridgeState'), pollCountdown:$('pollCountdown'),
-  heroCheckedAt:$('heroCheckedAt'), heroStateDot:$('heroStateDot'), healthScore:$('healthScore'), bridgeBadge:$('bridgeBadge'), bridgeLatency:$('bridgeLatency'),
-  sidebarBridgeLight:$('sidebarBridgeLight'), sidebarBridgeText:$('sidebarBridgeText'), sidebarBridgeDetail:$('sidebarBridgeDetail'), activityList:$('activityList')
-};
-
-let latestStatus = null;
-let pendingOperation = false;
-let pendingAction = null;
-let nextPollAt = Date.now() + APP_CONFIG.statusPollMs;
-let transitionTimer = null;
-const ACTIVITY_KEY = 'juliette_mission_activity';
-
-const labels = {
-  running:['Online','Servidor encendido','Azure informa que la máquina virtual está en ejecución.'],
-  starting:['Iniciando','Servidor iniciando','Azure aceptó la solicitud. Seguiremos comprobando el progreso.'],
-  restarting:['Reiniciando','Servidor reiniciando','Azure está reiniciando la máquina virtual.'],
-  deallocated:['Offline','Servidor apagado','La máquina virtual está desasignada y lista para iniciarse.'],
-  stopped:['Detenido','Servidor detenido','La máquina está detenida, pero podría seguir asignando recursos.'],
-  stopping:['Deteniendo','Servidor deteniéndose','Azure está procesando la detención.'],
-  deallocating:['Apagando','Servidor apagándose','Azure está desasignando la máquina virtual.'],
-  unknown:['Sin conexión','Estado no disponible','No fue posible determinar el estado actual.']
-};
-
-function normalizeState(status){return String(status?.powerState||status?.vm||'unknown').toLowerCase().replace('powerstate/','')}
-function isTransition(state){return ['starting','restarting','stopping','deallocating'].includes(state)}
-function formatTime(value){if(!value)return 'Sin datos';return new Intl.DateTimeFormat('es-CL',{hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(new Date(value))}
-function activityItems(){try{return JSON.parse(localStorage.getItem(ACTIVITY_KEY)||'[]')}catch{return []}}
-function saveActivity(action,detail,tone='neutral'){
-  const items=[{id:crypto.randomUUID?.()||String(Date.now()),action,detail,tone,at:new Date().toISOString()},...activityItems()].slice(0,8);
-  localStorage.setItem(ACTIVITY_KEY,JSON.stringify(items));renderActivity();
-}
-function renderActivity(){
-  const items=activityItems();
-  els.activityList.innerHTML=items.length?items.map(item=>`<div class="activity-item"><span class="activity-mark ${item.tone}"></span><div><strong>${item.action}</strong><small>${item.detail}</small></div><time>${formatTime(item.at)}</time></div>`).join(''):`<div class="activity-empty-compact"><span>◎</span><p>Las operaciones realizadas desde este navegador aparecerán aquí.</p></div>`;
-}
-
-function setBridgeVisual(online, detail='Operativo'){
-  els.bridgeDot.className=online?'online':''; els.bridgeState.textContent=online?'Azure Bridge conectado':'Azure Bridge sin conexión';
-  els.bridgeService.textContent=online?'Online':'Offline'; els.bridgeService.className=`service-state ${online?'state-running':'state-deallocated'}`;
-  els.bridgeBadge.textContent=online?'Online':'Offline'; els.bridgeBadge.className=`status ${online?'status-running':'status-deallocated'}`;
-  els.sidebarBridgeLight.className=`system-light ${online?'online':''}`; els.sidebarBridgeText.textContent=online?'Azure Bridge online':'Azure Bridge offline'; els.sidebarBridgeDetail.textContent=detail;
-}
-
-function renderStatus(status){
-  latestStatus=status; const state=normalizeState(status); const [badge,title,description]=labels[state]||labels.unknown; const online=state==='running'; const transition=isTransition(state);
-  els.badge.textContent=badge; els.badge.className=`status status-${state}`; els.title.textContent=title; els.description.textContent=description; els.icon.dataset.state=state;
-  els.region.textContent=status.region||'North Central US'; els.vmName.textContent=status.vmName||'kyodobot-server'; els.heroCheckedAt.textContent=formatTime(status.checkedAt); els.heroStateDot.className=online?'online':transition?'pending':'';
-  els.vmService.textContent=badge; els.vmService.className=`service-state state-${state}`;
-  els.dashboardService.textContent=online?'Disponible':'Sin conexión'; els.dashboardService.className=`service-state ${online?'state-running':'state-deallocated'}`;
-  els.botService.textContent=online?'No verificado':'Sin conexión'; els.botService.className=`service-state ${online?'state-unknown':'state-deallocated'}`;
-  els.start.disabled=online||transition||pendingOperation; els.restart.disabled=!online||transition||pendingOperation; els.stop.disabled=!online||transition||pendingOperation;
-  els.start.textContent=state==='starting'?'Iniciando…':'Encender'; els.restart.textContent=state==='restarting'?'Reiniciando…':'Reiniciar'; els.stop.textContent=['stopping','deallocating'].includes(state)?'Apagando…':'Apagar';
-  els.dashboardLink.classList.toggle('disabled-link',!online); els.dashboardLink.setAttribute('aria-disabled',String(!online));
-  setBridgeVisual(Boolean(status.apiConfigured),'Functions · Managed Identity');
-  const healthy=(online?2:0)+(status.apiConfigured?1:0); els.healthScore.textContent=`${healthy}/4`;
-  scheduleTransitionPolling(state);
-}
-
-function scheduleTransitionPolling(state){if(transitionTimer)clearTimeout(transitionTimer);transitionTimer=null;if(!isTransition(state))return;transitionTimer=setTimeout(()=>refreshStatus({quiet:true}),APP_CONFIG.transitionPollMs||5000)}
-function humanizeError(error){if(error.message==='API_NOT_CONFIGURED')return'Falta configurar la URL HTTPS de Azure Functions.';if(error.message==='API_TIMEOUT')return'Azure Bridge demoró demasiado en responder.';if(error.message==='API_UNREACHABLE')return'No fue posible conectar con Azure Bridge.';if(error.status===401)return'El código temporal del staff no es válido.';if(error.status===403)return'La Function no tiene permisos sobre la VM.';return error.payload?.detail||error.payload?.message||'Revisa Azure Functions y vuelve a intentarlo.'}
-
-async function refreshBridgeHealth(){
-  const started=performance.now();
-  try{const health=await fetchBridgeHealth();const latency=Math.round(performance.now()-started);els.bridgeLatency.textContent=`${latency} ms`;setBridgeVisual(Boolean(health.ok),`v${health.version} · ${latency} ms`)}catch{els.bridgeLatency.textContent='Sin respuesta';setBridgeVisual(false,'No responde')}
-}
-async function refreshStatus({quiet=false}={}){
-  els.refresh.disabled=true;els.refresh.classList.add('is-loading');
-  try{const status=await getStatus();renderStatus(status);await refreshBridgeHealth();if(!quiet)showToast('Estado actualizado','Datos obtenidos directamente desde Azure.');}
-  catch(error){renderStatus({...(latestStatus||{}),powerState:'unknown',checkedAt:new Date().toISOString(),apiConfigured:isApiConfigured()});setBridgeVisual(false,'Error de conexión');if(!quiet)showToast('No fue posible consultar Azure',humanizeError(error));}
-  finally{els.refresh.disabled=false;els.refresh.classList.remove('is-loading');nextPollAt=Date.now()+APP_CONFIG.statusPollMs;}
-}
-
-async function executeOperation(action){
-  const operations={start:{call:startVirtualMachine,title:'Encendido solicitado',state:'starting',activity:'Encender servidor'},restart:{call:restartVirtualMachine,title:'Reinicio solicitado',state:'restarting',activity:'Reiniciar servidor'},stop:{call:stopVirtualMachine,title:'Apagado solicitado',state:'deallocating',activity:'Apagar servidor'}};
-  const op=operations[action]; pendingOperation=true; document.querySelectorAll('.command-actions button').forEach(b=>b.disabled=true);
-  try{const result=await op.call();showToast(op.title,result.message||'Azure aceptó la operación.');saveActivity(op.activity,result.message||'Operación aceptada por Azure','success');renderStatus({...(latestStatus||{}),powerState:result.powerState||op.state,checkedAt:new Date().toISOString(),apiConfigured:true});setTimeout(()=>refreshStatus({quiet:true}),APP_CONFIG.transitionPollMs||5000);}
-  catch(error){if(error.status===401){setAccessToken('');pendingAction=action;openAccessModal();}showToast('Operación rechazada',humanizeError(error));saveActivity(`Error: ${op.activity}`,humanizeError(error),'error');}
-  finally{pendingOperation=false;if(latestStatus)renderStatus(latestStatus);}
-}
-function requestOperation(action){if(!isApiConfigured())return showToast('Azure Bridge sin configurar','Revisa config/app.js.');if(!getAccessToken()){pendingAction=action;return openAccessModal();}const copy={start:'encender',restart:'reiniciar',stop:'apagar'}[action];if(action!=='start'&&!window.confirm(`¿Confirmas que deseas ${copy} kyodobot-server?`))return;executeOperation(action)}
-
-els.start.addEventListener('click',()=>requestOperation('start'));els.restart.addEventListener('click',()=>requestOperation('restart'));els.stop.addEventListener('click',()=>requestOperation('stop'));els.refresh.addEventListener('click',()=>refreshStatus());
-$('menuButton').addEventListener('click',()=>$('sidebar').classList.toggle('open'));$('closeAccessModal').addEventListener('click',closeAccessModal);$('cancelAccess').addEventListener('click',closeAccessModal);
-$('confirmAccess').addEventListener('click',()=>{if(!els.token.value.trim())return showToast('Código requerido','Ingresa el código temporal entregado al staff.');setAccessToken(els.token.value);els.token.value='';closeAccessModal();const action=pendingAction||'start';pendingAction=null;requestOperation(action)});
-els.token.addEventListener('keydown',event=>{if(event.key==='Enter')$('confirmAccess').click()});$('accessModal').addEventListener('click',event=>{if(event.target.id==='accessModal')closeAccessModal()});
-els.dashboardLink.addEventListener('click',event=>{if(els.dashboardLink.getAttribute('aria-disabled')==='true')event.preventDefault()});$('clearActivity').addEventListener('click',()=>{localStorage.removeItem(ACTIVITY_KEY);renderActivity();});
-window.setInterval(()=>{const remaining=Math.max(0,Math.ceil((nextPollAt-Date.now())/1000));els.pollCountdown.textContent=`${remaining}s`},1000);
-renderActivity();await refreshStatus({quiet:true});window.setInterval(()=>refreshStatus({quiet:true}),APP_CONFIG.statusPollMs);
+const $=id=>document.getElementById(id);let latest=null,pendingAction=null,pending=false,nextPoll=Date.now()+APP_CONFIG.statusPollMs;const history=[];
+const labels={running:['Online','Servidor encendido','Azure informa que la VM está en ejecución.'],starting:['Iniciando','Servidor iniciando','Azure está procesando el encendido.'],restarting:['Reiniciando','Servidor reiniciando','Azure está reiniciando la VM.'],deallocated:['Offline','Servidor apagado','La VM está desasignada.'],stopped:['Detenido','Servidor detenido','La VM está detenida.'],stopping:['Deteniendo','Servidor deteniéndose','Azure está deteniendo la VM.'],deallocating:['Apagando','Servidor apagándose','Azure está desasignando la VM.'],unknown:['Sin conexión','Estado no disponible','No fue posible determinar el estado.']};
+const stateOf=s=>String(s?.powerState||s?.vm||'unknown').toLowerCase().replace('powerstate/','');const transition=s=>['starting','restarting','stopping','deallocating'].includes(s);const time=v=>v?new Intl.DateTimeFormat('es-CL',{hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(new Date(v)):'—';
+function needSession(action){pendingAction=action;if(!getAccessToken()||!getStaffName()){openAccessModal();return true}return false}
+function human(error){if(error.status===401)return'Código o sesión no válidos.';if(error.message==='API_TIMEOUT')return'La operación demoró demasiado.';return error.payload?.detail||error.payload?.message||'Operación no disponible.'}
+function renderTrend(ok){history.push(ok);if(history.length>24)history.shift();$('availabilityTrend').innerHTML=history.map(v=>`<i class="${v?'up':'down'}"></i>`).join('')}
+function renderVm(s){latest=s;const st=stateOf(s),[badge,title,desc]=labels[st]||labels.unknown,online=st==='running';$('vmStatusBadge').textContent=badge;$('vmStatusBadge').className=`status status-${st}`;$('runtimeTitle').textContent=title;$('runtimeDescription').textContent=desc;$('runtimeIcon').dataset.state=st;$('region').textContent=s.region||'North Central US';$('vmName').textContent=s.vmName||'kyodobot-server';$('heroCheckedAt').textContent=time(s.checkedAt);$('heroStateDot').className=online?'online':transition(st)?'pending':'';$('vmService').textContent=badge;$('vmService').className=`service-state state-${st}`;$('startButton').disabled=online||transition(st)||pending;$('restartButton').disabled=!online||transition(st)||pending;$('stopButton').disabled=!online||transition(st)||pending;$('dashboardLink').classList.toggle('disabled-link',!online);renderTrend(online)}
+async function bridge(){const t=performance.now();try{const h=await fetchBridgeHealth();const ms=Math.round(performance.now()-t);$('bridgeLatency').textContent=`${ms} ms`;$('bridgeSummary').textContent=`v${h.version} · ${ms} ms`;$('bridgeBadge').textContent='Online';$('bridgeBadge').className='status status-running';$('bridgeService').textContent='Online';$('bridgeService').className='service-state state-running';$('bridgeDot').className='online';$('bridgeState').textContent='Azure Bridge conectado';return true}catch{$('bridgeBadge').textContent='Offline';$('bridgeBadge').className='status status-deallocated';$('bridgeService').textContent='Offline';return false}}
+function uptime(sec){sec=Number(sec||0);const d=Math.floor(sec/86400),h=Math.floor(sec%86400/3600),m=Math.floor(sec%3600/60);return `${d}d ${h}h ${m}m`}
+async function runtime(quiet=false){if(!getAccessToken())return;try{const r=await fetchRuntimeStatus();$('memoryMetric').textContent=`${r.memoryPercent}%`;$('memoryMeter').value=r.memoryPercent;$('diskMetric').textContent=`${r.diskPercent}%`;$('diskMeter').value=r.diskPercent;$('loadMetric').textContent=r.load1;$('uptimeMetric').textContent=uptime(r.uptimeSeconds);$('gitMetric').textContent=`${r.branch} · ${r.commit}${r.dirty?' · cambios':''}`;const bot=r.bot==='running',dash=r.dashboard==='running';$('botService').textContent=bot?'Online':r.bot;$('botService').className=`service-state ${bot?'state-running':'state-deallocated'}`;$('dashboardService').textContent=dash?'Online':r.dashboard;$('dashboardService').className=`service-state ${dash?'state-running':'state-deallocated'}`;$('healthScore').textContent=`${[stateOf(latest)==='running',bot,dash,true].filter(Boolean).length}/4`;if(!quiet)showToast('Telemetría actualizada','Docker y recursos consultados dentro de la VM.')}catch(e){if(!quiet)showToast('Telemetría no disponible',human(e))}}
+async function audit(){if(!getAccessToken())return;try{const data=await fetchAudit();$('activityList').innerHTML=data.items.length?data.items.map(i=>`<div class="activity-item"><span class="activity-mark ${i.ok?'success':'error'}"></span><div><strong>${i.staff} · ${i.action}</strong><small>${i.detail}</small></div><time>${time(i.at)}</time></div>`).join(''):'<div class="activity-empty-compact"><span>◎</span><p>No hay acciones registradas.</p></div>'}catch(e){$('activityList').innerHTML=`<div class="activity-empty-compact"><span>!</span><p>${human(e)}</p></div>`}}
+async function refresh(quiet=true){$('refreshButton').disabled=true;try{renderVm(await getStatus());await bridge();await runtime(true)}catch(e){renderVm({powerState:'unknown',checkedAt:new Date().toISOString()});if(!quiet)showToast('Consulta fallida',human(e))}finally{$('refreshButton').disabled=false;nextPoll=Date.now()+APP_CONFIG.statusPollMs}}
+async function operation(action){const map={start:startVirtualMachine,restart:restartVirtualMachine,stop:stopVirtualMachine};if(needSession(action))return;if(action!=='start'&&!confirm(`¿Confirmas la operación ${action}?`))return;pending=true;renderVm(latest);try{const r=await map[action]();showToast('Operación aceptada',r.message||'Azure aceptó la solicitud.');setTimeout(()=>refresh(true),5000);await audit()}catch(e){if(e.status===401){setAccessToken('');openAccessModal()}showToast('Operación rechazada',human(e))}finally{pending=false;renderVm(latest)}}
+$('startButton').onclick=()=>operation('start');$('restartButton').onclick=()=>operation('restart');$('stopButton').onclick=()=>operation('stop');$('refreshButton').onclick=()=>refresh(false);$('runtimeRefresh').onclick=()=>{if(needSession('runtime'))return;runtime(false)};$('auditRefresh').onclick=()=>{if(needSession('audit'))return;audit()};
+$('logsButton').onclick=async()=>{if(needSession('logs'))return;$('logsOutput').textContent='Consultando logs…';try{const r=await fetchRuntimeLogs();$('logsOutput').textContent=r.logs||'Sin salida';await audit()}catch(e){$('logsOutput').textContent=human(e)}};
+$('updateButton').onclick=async()=>{if(needSession('update'))return;if(!confirm('Esto ejecutará /opt/kyodobot/update.sh y reiniciará servicios. ¿Continuar?'))return;$('updateButton').disabled=true;$('logsOutput').textContent='Actualizando KyodoBot…';try{const r=await updateRuntime();$('logsOutput').textContent=r.output||r.message;showToast('Actualización completada',r.message);await audit();setTimeout(()=>refresh(true),5000)}catch(e){$('logsOutput').textContent=human(e);showToast('Actualización fallida',human(e))}finally{$('updateButton').disabled=false}};
+$('closeAccessModal').onclick=closeAccessModal;$('cancelAccess').onclick=closeAccessModal;$('confirmAccess').onclick=()=>{const name=$('staffName').value.trim(),token=$('accessToken').value.trim();if(!name||!token)return showToast('Datos requeridos','Ingresa nombre y código.');setStaffName(name);setAccessToken(token);$('staffSession').textContent=name;$('staffSession').className='status status-running';closeAccessModal();const action=pendingAction;pendingAction=null;if(['start','restart','stop'].includes(action))operation(action);else if(action==='logs')$('logsButton').click();else if(action==='update')$('updateButton').click();else if(action==='audit')audit();else runtime(false)};
+$('staffName').value=getStaffName();if(getStaffName()){$('staffSession').textContent=getStaffName();$('staffSession').className='status status-running'}
+setInterval(()=>{$('pollCountdown').textContent=`${Math.max(0,Math.ceil((nextPoll-Date.now())/1000))}s`},1000);await refresh(true);if(getAccessToken()){await audit()}setInterval(()=>refresh(true),APP_CONFIG.statusPollMs);

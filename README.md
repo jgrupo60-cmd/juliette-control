@@ -48,3 +48,9 @@ git add .
 git commit -m "PR-006: Mission Control and VM operations"
 git push origin main
 ```
+
+## PR-007 — Operations Suite
+
+Añade telemetría interna mediante Azure VM Run Command, logs remotos, ejecución protegida de `/opt/kyodobot/update.sh`, atribución de acciones por nombre de staff y auditoría persistente en Azure Table Storage.
+
+> La sesión actual usa un token compartido más nombre declarado. Esto permite atribución y auditoría, pero todavía no equivale a autenticación individual criptográficamente verificada.

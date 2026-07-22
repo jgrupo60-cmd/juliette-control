@@ -1,21 +1,10 @@
 import { apiRequest } from './api.js';
-
-export async function startVirtualMachine() {
-  return apiRequest('/api/vm/start', { method: 'POST', body: '{}' });
-}
-
-export async function stopVirtualMachine() {
-  return apiRequest('/api/vm/stop', { method: 'POST', body: '{}' });
-}
-
-export async function restartVirtualMachine() {
-  return apiRequest('/api/vm/restart', { method: 'POST', body: '{}' });
-}
-
-export async function fetchVirtualMachineStatus() {
-  return apiRequest('/api/vm/status');
-}
-
-export async function fetchBridgeHealth() {
-  return apiRequest('/api/health');
-}
+export const startVirtualMachine=()=>apiRequest('/api/vm/start',{method:'POST',body:'{}'});
+export const stopVirtualMachine=()=>apiRequest('/api/vm/stop',{method:'POST',body:'{}'});
+export const restartVirtualMachine=()=>apiRequest('/api/vm/restart',{method:'POST',body:'{}'});
+export const fetchVirtualMachineStatus=()=>apiRequest('/api/vm/status');
+export const fetchBridgeHealth=()=>apiRequest('/api/health');
+export const fetchRuntimeStatus=()=>apiRequest('/api/runtime/status',{timeoutMs:70000});
+export const fetchRuntimeLogs=(lines=120)=>apiRequest(`/api/runtime/logs?lines=${lines}`,{timeoutMs:70000});
+export const updateRuntime=()=>apiRequest('/api/runtime/update',{method:'POST',body:'{}',timeoutMs:120000});
+export const fetchAudit=()=>apiRequest('/api/audit?limit=20',{timeoutMs:25000});

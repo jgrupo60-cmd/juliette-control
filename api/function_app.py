@@ -24,7 +24,7 @@ from azure.core.exceptions import AzureError, ClientAuthenticationError, HttpRes
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.compute import ComputeManagementClient
 
-APP_VERSION = "0.6.0"
+APP_VERSION = "0.7.0"
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 
@@ -56,7 +56,7 @@ def _cors_headers(req: func.HttpRequest) -> dict[str, str]:
         "Pragma": "no-cache",
         "Vary": "Origin",
         "X-Content-Type-Options": "nosniff",
-        "Access-Control-Allow-Headers": "Authorization, Content-Type",
+        "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Staff-Name",
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Max-Age": "600",
     }
@@ -238,6 +238,7 @@ def vm_start(req: func.HttpRequest) -> func.HttpResponse:
         # and the frontend polls /vm/status until the VM reports running.
         client.virtual_machines.begin_start(group, name)
         logging.info("VM start accepted for %s/%s request_id=%s", group, name, request_id)
+        _write_audit(req, "vm.start", "Solicitó encender kyodobot-server")
         return _json(
             req,
             {
@@ -308,6 +309,7 @@ def vm_stop(req: func.HttpRequest) -> func.HttpResponse:
 
         client.virtual_machines.begin_deallocate(group, name)
         logging.info("VM deallocate accepted for %s/%s request_id=%s", group, name, request_id)
+        _write_audit(req, "vm.stop", "Solicitó apagar y desasignar kyodobot-server")
         return _json(
             req,
             {"ok": True, "powerState": "deallocating", "message": "Azure aceptó la solicitud de apagado y desasignación.", "requestedAt": _utc_now()},
@@ -355,6 +357,7 @@ def vm_restart(req: func.HttpRequest) -> func.HttpResponse:
 
         client.virtual_machines.begin_restart(group, name)
         logging.info("VM restart accepted for %s/%s request_id=%s", group, name, request_id)
+        _write_audit(req, "vm.restart", "Solicitó reiniciar kyodobot-server")
         return _json(
             req,
             {"ok": True, "powerState": "restarting", "message": "Azure aceptó la solicitud de reinicio.", "requestedAt": _utc_now()},
@@ -376,3 +379,164 @@ def vm_restart(req: func.HttpRequest) -> func.HttpResponse:
     except Exception:
         logging.exception("Unexpected VM restart failure request_id=%s", request_id)
         return _json(req, {"error": "INTERNAL_ERROR"}, 500, request_id=request_id)
+
+# PR-007 · Operations Suite -------------------------------------------------
+# Runtime telemetry and maintenance use Azure VM Run Command. These calls are
+# intentionally protected by the same bearer token as infrastructure changes.
+
+def _staff_name(req: func.HttpRequest) -> str:
+    raw = (req.headers.get("X-Staff-Name") or "Staff").strip()
+    cleaned = "".join(ch for ch in raw if ch.isalnum() or ch in " _-.@")[:40]
+    return cleaned or "Staff"
+
+
+def _run_shell(script_lines: list[str]) -> str:
+    from azure.mgmt.compute.models import RunCommandInput
+
+    group, name = _vm_settings()
+    command = RunCommandInput(command_id="RunShellScript", script=script_lines)
+    result = _client().virtual_machines.begin_run_command(group, name, command).result()
+    output: list[str] = []
+    for item in getattr(result, "value", None) or []:
+        message = str(getattr(item, "message", "") or "")
+        if message:
+            output.append(message)
+    return "\n".join(output).strip()
+
+
+def _parse_marked_json(output: str) -> dict[str, Any]:
+    marker = "JULIETTE_JSON="
+    for line in reversed(output.splitlines()):
+        if marker in line:
+            return json.loads(line.split(marker, 1)[1].strip())
+    raise ValueError("Runtime response did not contain marked JSON")
+
+
+def _audit_table():
+    from azure.data.tables import TableServiceClient
+
+    connection = _required_setting("AzureWebJobsStorage")
+    service = TableServiceClient.from_connection_string(connection)
+    table = service.get_table_client("JulietteControlAudit")
+    try:
+        table.create_table()
+    except Exception:
+        pass
+    return table
+
+
+def _write_audit(req: func.HttpRequest, action: str, detail: str, ok: bool = True) -> None:
+    try:
+        now = datetime.now(timezone.utc)
+        _audit_table().create_entity({
+            "PartitionKey": now.strftime("%Y-%m"),
+            "RowKey": f"{now.strftime('%Y%m%dT%H%M%S%f')}-{uuid.uuid4().hex[:8]}",
+            "staff": _staff_name(req),
+            "action": action[:80],
+            "detail": detail[:500],
+            "ok": bool(ok),
+            "at": now.isoformat(),
+        })
+    except Exception:
+        logging.exception("Could not persist audit event")
+
+
+@app.route(route="runtime/status", methods=["GET", "OPTIONS"])
+def runtime_status(req: func.HttpRequest) -> func.HttpResponse:
+    if response := _preflight_or_reject_origin(req):
+        return response
+    request_id = str(uuid.uuid4())
+    try:
+        if not _authorized(req):
+            return _json(req, {"error": "UNAUTHORIZED"}, 401, request_id=request_id)
+        output = _run_shell([
+            "set -u",
+            "bot=$(docker inspect -f '{{.State.Status}}' kyodobot 2>/dev/null || echo missing)",
+            "dash=$(docker inspect -f '{{.State.Status}}' kyodobot-dashboard 2>/dev/null || echo missing)",
+            "bot_health=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' kyodobot 2>/dev/null || echo unknown)",
+            "dash_health=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' kyodobot-dashboard 2>/dev/null || echo unknown)",
+            "uptime_s=$(cut -d. -f1 /proc/uptime)",
+            "load=$(cut -d' ' -f1 /proc/loadavg)",
+            "mem=$(free -m | awk '/Mem:/ {printf \"%d\", ($3*100)/$2}')",
+            "disk=$(df -P / | awk 'NR==2 {gsub(/%/,\"\",$5); print $5}')",
+            "repo=/opt/kyodobot",
+            "branch=$(git -C $repo rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)",
+            "commit=$(git -C $repo rev-parse --short HEAD 2>/dev/null || echo unknown)",
+            "dirty=$(test -n \"$(git -C $repo status --porcelain 2>/dev/null)\" && echo true || echo false)",
+            "printf 'JULIETTE_JSON={\"bot\":\"%s\",\"dashboard\":\"%s\",\"botHealth\":\"%s\",\"dashboardHealth\":\"%s\",\"uptimeSeconds\":%s,\"load1\":\"%s\",\"memoryPercent\":%s,\"diskPercent\":%s,\"branch\":\"%s\",\"commit\":\"%s\",\"dirty\":%s}\\n' \"$bot\" \"$dash\" \"$bot_health\" \"$dash_health\" \"$uptime_s\" \"$load\" \"$mem\" \"$disk\" \"$branch\" \"$commit\" \"$dirty\"",
+        ])
+        data = _parse_marked_json(output)
+        data.update({"ok": True, "checkedAt": _utc_now()})
+        return _json(req, data, request_id=request_id)
+    except HttpResponseError as exc:
+        return _json(req, {"error": "RUNTIME_STATUS_FAILED", "detail": _safe_http_detail(exc)}, getattr(exc, "status_code", None) or 502, request_id=request_id)
+    except Exception:
+        logging.exception("Runtime status failed request_id=%s", request_id)
+        return _json(req, {"error": "RUNTIME_STATUS_FAILED", "detail": "No fue posible consultar Docker dentro de la VM."}, 502, request_id=request_id)
+
+
+@app.route(route="runtime/logs", methods=["GET", "OPTIONS"])
+def runtime_logs(req: func.HttpRequest) -> func.HttpResponse:
+    if response := _preflight_or_reject_origin(req):
+        return response
+    request_id = str(uuid.uuid4())
+    try:
+        if not _authorized(req):
+            return _json(req, {"error": "UNAUTHORIZED"}, 401, request_id=request_id)
+        try:
+            lines = max(20, min(300, int(req.params.get("lines", "120"))))
+        except ValueError:
+            lines = 120
+        output = _run_shell([
+            f"echo '=== kyodobot (últimas {lines} líneas) ==='",
+            f"docker logs kyodobot --tail {lines} 2>&1 || true",
+            "echo '=== dashboard (últimas 60 líneas) ==='",
+            "docker logs kyodobot-dashboard --tail 60 2>&1 || true",
+        ])
+        _write_audit(req, "runtime.logs", f"Consultó {lines} líneas de logs")
+        return _json(req, {"ok": True, "logs": output[-50000:], "checkedAt": _utc_now()}, request_id=request_id)
+    except Exception:
+        logging.exception("Runtime logs failed request_id=%s", request_id)
+        return _json(req, {"error": "RUNTIME_LOGS_FAILED", "detail": "No fue posible recuperar los logs."}, 502, request_id=request_id)
+
+
+@app.route(route="runtime/update", methods=["POST", "OPTIONS"])
+def runtime_update(req: func.HttpRequest) -> func.HttpResponse:
+    if response := _preflight_or_reject_origin(req):
+        return response
+    request_id = str(uuid.uuid4())
+    try:
+        if not _authorized(req):
+            return _json(req, {"error": "UNAUTHORIZED"}, 401, request_id=request_id)
+        output = _run_shell([
+            "set -e",
+            "cd /opt/kyodobot",
+            "if [ -x ./update.sh ]; then sudo ./update.sh; else echo 'update.sh no existe o no es ejecutable'; exit 12; fi",
+        ])
+        _write_audit(req, "runtime.update", "Ejecutó /opt/kyodobot/update.sh")
+        return _json(req, {"ok": True, "message": "Actualización ejecutada en la VM.", "output": output[-12000:], "completedAt": _utc_now()}, request_id=request_id)
+    except Exception as exc:
+        logging.exception("Runtime update failed request_id=%s", request_id)
+        _write_audit(req, "runtime.update", "La actualización falló", False)
+        return _json(req, {"error": "RUNTIME_UPDATE_FAILED", "detail": "La actualización remota falló. Revisa los logs."}, 502, request_id=request_id)
+
+
+@app.route(route="audit", methods=["GET", "OPTIONS"])
+def audit(req: func.HttpRequest) -> func.HttpResponse:
+    if response := _preflight_or_reject_origin(req):
+        return response
+    request_id = str(uuid.uuid4())
+    try:
+        if not _authorized(req):
+            return _json(req, {"error": "UNAUTHORIZED"}, 401, request_id=request_id)
+        try:
+            limit = max(1, min(50, int(req.params.get("limit", "20"))))
+        except ValueError:
+            limit = 20
+        entities = list(_audit_table().list_entities())
+        entities.sort(key=lambda item: str(item.get("at", "")), reverse=True)
+        items = [{"staff": e.get("staff", "Staff"), "action": e.get("action", ""), "detail": e.get("detail", ""), "ok": bool(e.get("ok", True)), "at": e.get("at", "")} for e in entities[:limit]]
+        return _json(req, {"ok": True, "items": items}, request_id=request_id)
+    except Exception:
+        logging.exception("Audit query failed request_id=%s", request_id)
+        return _json(req, {"error": "AUDIT_FAILED", "detail": "No fue posible leer la auditoría."}, 502, request_id=request_id)
