@@ -1,0 +1,2 @@
+export function toastMarkup(){return `<div class="toast" id="toast"><strong id="toastTitle">Modo demostración</strong><span id="toastMessage">La acción todavía no está conectada con Azure.</span></div>`}
+export function showToast(title,message){const t=document.getElementById('toast');document.getElementById('toastTitle').textContent=title;document.getElementById('toastMessage').textContent=message;t.classList.add('show');clearTimeout(window.julietteToast);window.julietteToast=setTimeout(()=>t.classList.remove('show'),3200)}

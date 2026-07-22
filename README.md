@@ -1,24 +1,53 @@
 # Juliette Control Center
 
-Panel independiente para supervisar y encender Juliette/KyodoBot aunque la VM principal esté apagada.
+Panel independiente para operar Juliette/KyodoBot aunque la VM principal esté apagada.
 
-## PR-001 — Foundation
+## PR-002 — Application Architecture
 
-- Interfaz estática responsive.
-- Tema oscuro e identidad visual de Juliette.
-- Estado visual del servidor y servicios.
-- Botón de encendido en modo demostración.
-- Accesos rápidos.
-- Preparado para GitHub Pages.
+Este bloque transforma la landing inicial en una aplicación estática modular preparada para crecer.
+
+### Incluye
+
+- Landing renovada.
+- Dashboard independiente.
+- Pantalla de acceso demostrativa.
+- Sidebar responsive.
+- Componentes reutilizables de navegación y notificaciones.
+- Servicios separados para estado, autenticación, API y Azure.
+- Configuración centralizada.
+- Preparación del botón de encendido para una API real.
+
+### Estructura
+
+```text
+index.html
+login.html
+dashboard.html
+assets/
+  css/
+  js/
+components/
+services/
+config/
+```
 
 ## Publicación
 
-Configura GitHub Pages con `main` y `/ (root)`.
+GitHub Pages:
 
-Sitio esperado:
-
-`https://jgrupo60-cmd.github.io/juliette-control/`
+- Rama: `main`
+- Carpeta: `/ (root)`
 
 ## Seguridad
 
-Nunca guardes secretos, tokens, contraseñas o claves de Azure en este repositorio. La acción real se conectará mediante una API separada y permisos limitados.
+No almacenar credenciales, tokens, secretos ni claves de Azure en este repositorio público.
+
+## Próximo bloque
+
+PR-003 — Azure Bridge:
+
+- API independiente.
+- Estado real de la VM.
+- Inicio real de `kyodobot-server`.
+- CORS restringido al dominio de GitHub Pages.
+- Identidad administrada y permisos mínimos.
