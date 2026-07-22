@@ -24,7 +24,7 @@ from azure.core.exceptions import AzureError, ClientAuthenticationError, HttpRes
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.compute import ComputeManagementClient
 
-APP_VERSION = "0.7.0"
+APP_VERSION = "0.8.0"
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 
@@ -443,36 +443,70 @@ def _write_audit(req: func.HttpRequest, action: str, detail: str, ok: bool = Tru
 
 @app.route(route="runtime/status", methods=["GET", "OPTIONS"])
 def runtime_status(req: func.HttpRequest) -> func.HttpResponse:
+    """Return read-only telemetry from inside the VM.
+
+    This endpoint intentionally does not require the staff token: it only reads
+    health data and is already restricted by CORS to the Control Center origin.
+    Mutating operations and logs remain protected.
+    """
     if response := _preflight_or_reject_origin(req):
         return response
     request_id = str(uuid.uuid4())
     try:
-        if not _authorized(req):
-            return _json(req, {"error": "UNAUTHORIZED"}, 401, request_id=request_id)
+        group, name = _vm_settings()
+        current = _power_state(_client().virtual_machines.instance_view(group, name).statuses)
+        if current != "running":
+            return _json(req, {
+                "ok": True,
+                "available": False,
+                "powerState": current,
+                "checkedAt": _utc_now(),
+            }, request_id=request_id)
+
         output = _run_shell([
-            "set -u",
-            "bot=$(docker inspect -f '{{.State.Status}}' kyodobot 2>/dev/null || echo missing)",
-            "dash=$(docker inspect -f '{{.State.Status}}' kyodobot-dashboard 2>/dev/null || echo missing)",
-            "bot_health=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' kyodobot 2>/dev/null || echo unknown)",
-            "dash_health=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' kyodobot-dashboard 2>/dev/null || echo unknown)",
-            "uptime_s=$(cut -d. -f1 /proc/uptime)",
-            "load=$(cut -d' ' -f1 /proc/loadavg)",
-            "mem=$(free -m | awk '/Mem:/ {printf \"%d\", ($3*100)/$2}')",
-            "disk=$(df -P / | awk 'NR==2 {gsub(/%/,\"\",$5); print $5}')",
-            "repo=/opt/kyodobot",
-            "branch=$(git -C $repo rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)",
-            "commit=$(git -C $repo rev-parse --short HEAD 2>/dev/null || echo unknown)",
-            "dirty=$(test -n \"$(git -C $repo status --porcelain 2>/dev/null)\" && echo true || echo false)",
-            "printf 'JULIETTE_JSON={\"bot\":\"%s\",\"dashboard\":\"%s\",\"botHealth\":\"%s\",\"dashboardHealth\":\"%s\",\"uptimeSeconds\":%s,\"load1\":\"%s\",\"memoryPercent\":%s,\"diskPercent\":%s,\"branch\":\"%s\",\"commit\":\"%s\",\"dirty\":%s}\\n' \"$bot\" \"$dash\" \"$bot_health\" \"$dash_health\" \"$uptime_s\" \"$load\" \"$mem\" \"$disk\" \"$branch\" \"$commit\" \"$dirty\"",
+            "python3 - <<'PY'",
+            "import json, os, subprocess, time, urllib.request",
+            "def run(*args):",
+            "    try: return subprocess.check_output(args, text=True, stderr=subprocess.DEVNULL).strip()",
+            "    except Exception: return ''",
+            "def inspect(name):",
+            "    raw=run('docker','inspect',name)",
+            "    if not raw: return {'name':name,'status':'missing','health':'unknown','restarts':0}",
+            "    try:",
+            "        obj=json.loads(raw)[0]; state=obj.get('State') or {}",
+            "        return {'name':name,'status':state.get('Status','unknown'),'health':(state.get('Health') or {}).get('Status','none'),'restarts':int(obj.get('RestartCount') or 0),'startedAt':state.get('StartedAt','')} ",
+            "    except Exception: return {'name':name,'status':'unknown','health':'unknown','restarts':0}",
+            "mem={}",
+            "for line in open('/proc/meminfo'):",
+            "    key,val,*_=line.split(); mem[key.rstrip(':')]=int(val)",
+            "total=mem.get('MemTotal',0); available=mem.get('MemAvailable',0); used=max(0,total-available)",
+            "st=os.statvfs('/'); disk_total=st.f_blocks*st.f_frsize; disk_free=st.f_bavail*st.f_frsize; disk_used=disk_total-disk_free",
+            "load1=os.getloadavg()[0] if hasattr(os,'getloadavg') else 0",
+            "uptime=float(open('/proc/uptime').read().split()[0])",
+            "repo='/opt/kyodobot'",
+            "branch=run('git','-C',repo,'rev-parse','--abbrev-ref','HEAD') or 'unknown'",
+            "commit=run('git','-C',repo,'rev-parse','--short','HEAD') or 'unknown'",
+            "dirty=bool(run('git','-C',repo,'status','--porcelain'))",
+            "behind=run('git','-C',repo,'rev-list','--count','HEAD..@{u}') or '0'",
+            "dash_http={'reachable':False,'statusCode':None,'latencyMs':None}",
+            "t=time.perf_counter()",
+            "for url in ('http://127.0.0.1:5000/','http://127.0.0.1:5000/live'):",
+            "    try:",
+            "        with urllib.request.urlopen(url,timeout=4) as r:",
+            "            dash_http={'reachable':200 <= r.status < 500,'statusCode':r.status,'latencyMs':round((time.perf_counter()-t)*1000)}; break",
+            "    except Exception: pass",
+            "payload={'bot':inspect('kyodobot'),'dashboard':inspect('kyodobot-dashboard'),'dashboardHttp':dash_http,'uptimeSeconds':round(uptime),'load1':round(load1,2),'memoryPercent':round((used/total*100) if total else 0),'memoryUsedMb':round(used/1024),'memoryTotalMb':round(total/1024),'diskPercent':round((disk_used/disk_total*100) if disk_total else 0),'diskUsedGb':round(disk_used/1073741824,1),'diskTotalGb':round(disk_total/1073741824,1),'branch':branch,'commit':commit,'dirty':dirty,'behind':int(behind) if behind.isdigit() else 0}",
+            "print('JULIETTE_JSON='+json.dumps(payload,separators=(',',':')))",
+            "PY",
         ])
         data = _parse_marked_json(output)
-        data.update({"ok": True, "checkedAt": _utc_now()})
+        data.update({"ok": True, "available": True, "powerState": current, "checkedAt": _utc_now()})
         return _json(req, data, request_id=request_id)
     except HttpResponseError as exc:
         return _json(req, {"error": "RUNTIME_STATUS_FAILED", "detail": _safe_http_detail(exc)}, getattr(exc, "status_code", None) or 502, request_id=request_id)
     except Exception:
         logging.exception("Runtime status failed request_id=%s", request_id)
-        return _json(req, {"error": "RUNTIME_STATUS_FAILED", "detail": "No fue posible consultar Docker dentro de la VM."}, 502, request_id=request_id)
+        return _json(req, {"error": "RUNTIME_STATUS_FAILED", "detail": "No fue posible consultar la telemetría interna de la VM."}, 502, request_id=request_id)
 
 
 @app.route(route="runtime/logs", methods=["GET", "OPTIONS"])
