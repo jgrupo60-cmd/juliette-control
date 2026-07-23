@@ -1,8 +1,9 @@
-PR-004.3 - Python runtime publish fix
+Juliette Control Center
 
-Reemplaza la carpeta scripts del proyecto y ejecuta nuevamente:
+Herramienta mínima para consultar el estado de kyodobot-server y encender la VM cuando esté apagada.
 
-Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\deploy-pr004.ps1
-
-El despliegue ahora indica explícitamente a Azure Functions Core Tools que el proyecto usa Python.
+Rutas activas:
+POST /api/auth/login
+GET  /api/auth/session
+GET  /api/service/status
+POST /api/service/start

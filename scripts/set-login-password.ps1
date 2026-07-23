@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 $FunctionApp = "juliette-control-api"
 $ResourceGroup = "JULIETTE-CONTROL"
 
-$secure = Read-Host "Nueva contraseña de Mission Control" -AsSecureString
+$secure = Read-Host "Nueva contraseña de Juliette Control Center" -AsSecureString
 $confirm = Read-Host "Repite la contraseña" -AsSecureString
 $ptr1 = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
 $ptr2 = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($confirm)

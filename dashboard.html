@@ -2,13 +2,27 @@
 <html lang="es">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0a0d12">
-  <title>Dashboard · Juliette Control</title>
+  <title>Juliette · Control Center</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/css/base.css"><link rel="stylesheet" href="assets/css/dashboard.css">
+  <link rel="stylesheet" href="assets/css/base.css"><link rel="stylesheet" href="assets/css/control.css">
 </head>
-<body>
-  <div id="appShell"></div>
+<body class="simple-page">
+  <main class="control-card compact-card">
+    <div class="control-top">
+      <a class="brand simple-brand" href="index.html"><span class="brand-mark">J</span><span><strong>Juliette</strong><small>Control Center</small></span></a>
+      <button class="logout-button" id="logoutButton" type="button">Cerrar sesión</button>
+    </div>
+    <section class="status-content">
+      <p class="eyebrow">Estado</p>
+      <div class="state-line"><span class="state-dot" id="stateDot"></span><h1 id="stateTitle">Consultando…</h1></div>
+      <p id="stateDescription">Comprobando el estado de la máquina virtual.</p>
+      <p class="last-check">Última comprobación: <strong id="lastChecked">—</strong></p>
+      <button class="button button-primary button-wide" id="startButton" type="button" hidden>Encender Juliette</button>
+      <p class="running-message" id="runningMessage" hidden>Juliette ya está funcionando.</p>
+      <p class="action-message" id="actionMessage" hidden></p>
+    </section>
+  </main>
   <script type="module" src="assets/js/dashboard.js"></script>
 </body>
 </html>

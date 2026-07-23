@@ -68,7 +68,7 @@ Set-Content -Path $ConfigPath -Value $config -Encoding UTF8
 
 Write-Host "" 
 Write-Host "PR-004 desplegado correctamente." -ForegroundColor Green
-Write-Host "API: $ApiBaseUrl/api/health"
+Write-Host "API: $ApiBaseUrl/api/service/status"
 Write-Host ""
 Write-Host "Ahora revisa config/app.js, prueba la API y luego ejecuta:" -ForegroundColor Yellow
 Write-Host "  git add ."

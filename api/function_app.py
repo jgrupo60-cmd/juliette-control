@@ -1,9 +1,10 @@
 """Juliette Control Center — Azure Bridge.
 
 Endpoints:
-- GET  /api/health
-- GET  /api/vm/status
-- POST /api/vm/start, /api/vm/stop and /api/vm/restart (Bearer token required)
+- POST /api/auth/login
+- GET  /api/auth/session
+- GET  /api/service/status
+- POST /api/service/start (Bearer token required)
 
 The Function App authenticates to Azure with its system-assigned managed
 identity. No Azure client secret is stored in this project.
@@ -205,6 +206,8 @@ def _safe_http_detail(exc: HttpResponseError) -> str:
     return "Azure rechazó la operación solicitada."
 
 
+
+
 @app.route(route="auth/login", methods=["POST", "OPTIONS"])
 def auth_login(req: func.HttpRequest) -> func.HttpResponse:
     if response := _preflight_or_reject_origin(req):
@@ -223,7 +226,6 @@ def auth_login(req: func.HttpRequest) -> func.HttpResponse:
     logging.info("Control Center login accepted staff=%s request_id=%s", staff, request_id)
     return _json(req, {"ok": True, "token": token, "staff": staff, "expiresAt": expires_at}, request_id=request_id)
 
-
 @app.route(route="auth/session", methods=["GET", "OPTIONS"])
 def auth_session(req: func.HttpRequest) -> func.HttpResponse:
     if response := _preflight_or_reject_origin(req):
@@ -233,24 +235,8 @@ def auth_session(req: func.HttpRequest) -> func.HttpResponse:
         return _json(req, {"error": "UNAUTHORIZED"}, 401)
     return _json(req, {"ok": True, "staff": payload.get("sub", "Staff"), "expiresAt": datetime.fromtimestamp(int(payload["exp"]), timezone.utc).isoformat()})
 
-
-@app.route(route="health", methods=["GET", "OPTIONS"])
-def health(req: func.HttpRequest) -> func.HttpResponse:
-    if response := _preflight_or_reject_origin(req):
-        return response
-    return _json(
-        req,
-        {
-            "ok": True,
-            "service": "juliette-control-azure-bridge",
-            "version": APP_VERSION,
-            "checkedAt": _utc_now(),
-        },
-    )
-
-
-@app.route(route="vm/status", methods=["GET", "OPTIONS"])
-def vm_status(req: func.HttpRequest) -> func.HttpResponse:
+@app.route(route="service/status", methods=["GET", "OPTIONS"])
+def service_status(req: func.HttpRequest) -> func.HttpResponse:
     if response := _preflight_or_reject_origin(req):
         return response
 
@@ -292,9 +278,8 @@ def vm_status(req: func.HttpRequest) -> func.HttpResponse:
         logging.exception("Unexpected VM status failure request_id=%s", request_id)
         return _json(req, {"error": "INTERNAL_ERROR"}, 500, request_id=request_id)
 
-
-@app.route(route="vm/start", methods=["POST", "OPTIONS"])
-def vm_start(req: func.HttpRequest) -> func.HttpResponse:
+@app.route(route="service/start", methods=["POST", "OPTIONS"])
+def service_start(req: func.HttpRequest) -> func.HttpResponse:
     if response := _preflight_or_reject_origin(req):
         return response
 
@@ -336,7 +321,6 @@ def vm_start(req: func.HttpRequest) -> func.HttpResponse:
         # and the frontend polls /vm/status until the VM reports running.
         client.virtual_machines.begin_start(group, name)
         logging.info("VM start accepted for %s/%s request_id=%s", group, name, request_id)
-        _write_audit(req, "vm.start", "Solicitó encender kyodobot-server")
         return _json(
             req,
             {
@@ -368,308 +352,3 @@ def vm_start(req: func.HttpRequest) -> func.HttpResponse:
     except Exception:
         logging.exception("Unexpected VM start failure request_id=%s", request_id)
         return _json(req, {"error": "INTERNAL_ERROR"}, 500, request_id=request_id)
-
-
-@app.route(route="vm/stop", methods=["POST", "OPTIONS"])
-def vm_stop(req: func.HttpRequest) -> func.HttpResponse:
-    if response := _preflight_or_reject_origin(req):
-        return response
-
-    request_id = str(uuid.uuid4())
-    try:
-        if not _authorized(req):
-            return _json(req, {"error": "UNAUTHORIZED"}, 401, request_id=request_id)
-
-        group, name = _vm_settings()
-        client = _client()
-        current = _power_state(client.virtual_machines.instance_view(group, name).statuses)
-
-        if current in {"deallocated", "stopped"}:
-            return _json(
-                req,
-                {"ok": True, "powerState": current, "message": "Juliette ya está apagada."},
-                request_id=request_id,
-            )
-        if current in {"stopping", "deallocating"}:
-            return _json(
-                req,
-                {"ok": True, "powerState": current, "message": "Juliette ya se está apagando."},
-                202,
-                request_id=request_id,
-            )
-        if current == "starting":
-            return _json(
-                req,
-                {"ok": False, "powerState": current, "message": "Espera a que finalice el inicio antes de apagar."},
-                409,
-                request_id=request_id,
-            )
-
-        client.virtual_machines.begin_deallocate(group, name)
-        logging.info("VM deallocate accepted for %s/%s request_id=%s", group, name, request_id)
-        _write_audit(req, "vm.stop", "Solicitó apagar y desasignar kyodobot-server")
-        return _json(
-            req,
-            {"ok": True, "powerState": "deallocating", "message": "Azure aceptó la solicitud de apagado y desasignación.", "requestedAt": _utc_now()},
-            202,
-            request_id=request_id,
-        )
-    except RuntimeError as exc:
-        logging.exception("Azure Bridge configuration error request_id=%s", request_id)
-        return _json(req, {"error": "BRIDGE_NOT_CONFIGURED", "detail": str(exc)}, 503, request_id=request_id)
-    except ClientAuthenticationError:
-        logging.exception("Managed identity authentication failed request_id=%s", request_id)
-        return _json(req, {"error": "AZURE_AUTH_FAILED"}, 502, request_id=request_id)
-    except HttpResponseError as exc:
-        logging.exception("Azure rejected VM stop request request_id=%s", request_id)
-        return _json(req, {"error": "AZURE_STOP_FAILED", "detail": _safe_http_detail(exc)}, getattr(exc, "status_code", None) or 502, request_id=request_id)
-    except AzureError:
-        logging.exception("Azure SDK failure while stopping VM request_id=%s", request_id)
-        return _json(req, {"error": "AZURE_UNAVAILABLE"}, 502, request_id=request_id)
-    except Exception:
-        logging.exception("Unexpected VM stop failure request_id=%s", request_id)
-        return _json(req, {"error": "INTERNAL_ERROR"}, 500, request_id=request_id)
-
-
-@app.route(route="vm/restart", methods=["POST", "OPTIONS"])
-def vm_restart(req: func.HttpRequest) -> func.HttpResponse:
-    if response := _preflight_or_reject_origin(req):
-        return response
-
-    request_id = str(uuid.uuid4())
-    try:
-        if not _authorized(req):
-            return _json(req, {"error": "UNAUTHORIZED"}, 401, request_id=request_id)
-
-        group, name = _vm_settings()
-        client = _client()
-        current = _power_state(client.virtual_machines.instance_view(group, name).statuses)
-
-        if current != "running":
-            return _json(
-                req,
-                {"ok": False, "powerState": current, "message": "La VM debe estar encendida para reiniciarla."},
-                409,
-                request_id=request_id,
-            )
-
-        client.virtual_machines.begin_restart(group, name)
-        logging.info("VM restart accepted for %s/%s request_id=%s", group, name, request_id)
-        _write_audit(req, "vm.restart", "Solicitó reiniciar kyodobot-server")
-        return _json(
-            req,
-            {"ok": True, "powerState": "restarting", "message": "Azure aceptó la solicitud de reinicio.", "requestedAt": _utc_now()},
-            202,
-            request_id=request_id,
-        )
-    except RuntimeError as exc:
-        logging.exception("Azure Bridge configuration error request_id=%s", request_id)
-        return _json(req, {"error": "BRIDGE_NOT_CONFIGURED", "detail": str(exc)}, 503, request_id=request_id)
-    except ClientAuthenticationError:
-        logging.exception("Managed identity authentication failed request_id=%s", request_id)
-        return _json(req, {"error": "AZURE_AUTH_FAILED"}, 502, request_id=request_id)
-    except HttpResponseError as exc:
-        logging.exception("Azure rejected VM restart request request_id=%s", request_id)
-        return _json(req, {"error": "AZURE_RESTART_FAILED", "detail": _safe_http_detail(exc)}, getattr(exc, "status_code", None) or 502, request_id=request_id)
-    except AzureError:
-        logging.exception("Azure SDK failure while restarting VM request_id=%s", request_id)
-        return _json(req, {"error": "AZURE_UNAVAILABLE"}, 502, request_id=request_id)
-    except Exception:
-        logging.exception("Unexpected VM restart failure request_id=%s", request_id)
-        return _json(req, {"error": "INTERNAL_ERROR"}, 500, request_id=request_id)
-
-# PR-007 · Operations Suite -------------------------------------------------
-# Runtime telemetry and maintenance use Azure VM Run Command. These calls are
-# intentionally protected by the same bearer token as infrastructure changes.
-
-def _staff_name(req: func.HttpRequest) -> str:
-    payload = _session_payload(_bearer_token(req))
-    raw = str((payload or {}).get("sub") or "Staff").strip()
-    cleaned = "".join(ch for ch in raw if ch.isalnum() or ch in " _-.@")[:40]
-    return cleaned or "Staff"
-
-
-def _run_shell(script_lines: list[str]) -> str:
-    from azure.mgmt.compute.models import RunCommandInput
-
-    group, name = _vm_settings()
-    command = RunCommandInput(command_id="RunShellScript", script=script_lines)
-    result = _client().virtual_machines.begin_run_command(group, name, command).result()
-    output: list[str] = []
-    for item in getattr(result, "value", None) or []:
-        message = str(getattr(item, "message", "") or "")
-        if message:
-            output.append(message)
-    return "\n".join(output).strip()
-
-
-def _parse_marked_json(output: str) -> dict[str, Any]:
-    marker = "JULIETTE_JSON="
-    for line in reversed(output.splitlines()):
-        if marker in line:
-            return json.loads(line.split(marker, 1)[1].strip())
-    raise ValueError("Runtime response did not contain marked JSON")
-
-
-def _audit_table():
-    from azure.data.tables import TableServiceClient
-
-    connection = _required_setting("AzureWebJobsStorage")
-    service = TableServiceClient.from_connection_string(connection)
-    table = service.get_table_client("JulietteControlAudit")
-    try:
-        table.create_table()
-    except Exception:
-        pass
-    return table
-
-
-def _write_audit(req: func.HttpRequest, action: str, detail: str, ok: bool = True) -> None:
-    try:
-        now = datetime.now(timezone.utc)
-        _audit_table().create_entity({
-            "PartitionKey": now.strftime("%Y-%m"),
-            "RowKey": f"{now.strftime('%Y%m%dT%H%M%S%f')}-{uuid.uuid4().hex[:8]}",
-            "staff": _staff_name(req),
-            "action": action[:80],
-            "detail": detail[:500],
-            "ok": bool(ok),
-            "at": now.isoformat(),
-        })
-    except Exception:
-        logging.exception("Could not persist audit event")
-
-
-@app.route(route="runtime/status", methods=["GET", "OPTIONS"])
-def runtime_status(req: func.HttpRequest) -> func.HttpResponse:
-    """Return read-only telemetry from inside the VM.
-
-    This endpoint intentionally does not require the staff token: it only reads
-    health data and is already restricted by CORS to the Control Center origin.
-    Mutating operations and logs remain protected.
-    """
-    if response := _preflight_or_reject_origin(req):
-        return response
-    request_id = str(uuid.uuid4())
-    try:
-        group, name = _vm_settings()
-        current = _power_state(_client().virtual_machines.instance_view(group, name).statuses)
-        if current != "running":
-            return _json(req, {
-                "ok": True,
-                "available": False,
-                "powerState": current,
-                "checkedAt": _utc_now(),
-            }, request_id=request_id)
-
-        output = _run_shell([
-            "python3 - <<'PY'",
-            "import json, os, subprocess, time, urllib.request",
-            "def run(*args):",
-            "    try: return subprocess.check_output(args, text=True, stderr=subprocess.DEVNULL).strip()",
-            "    except Exception: return ''",
-            "def inspect(name):",
-            "    raw=run('docker','inspect',name)",
-            "    if not raw: return {'name':name,'status':'missing','health':'unknown','restarts':0}",
-            "    try:",
-            "        obj=json.loads(raw)[0]; state=obj.get('State') or {}",
-            "        return {'name':name,'status':state.get('Status','unknown'),'health':(state.get('Health') or {}).get('Status','none'),'restarts':int(obj.get('RestartCount') or 0),'startedAt':state.get('StartedAt','')} ",
-            "    except Exception: return {'name':name,'status':'unknown','health':'unknown','restarts':0}",
-            "mem={}",
-            "for line in open('/proc/meminfo'):",
-            "    key,val,*_=line.split(); mem[key.rstrip(':')]=int(val)",
-            "total=mem.get('MemTotal',0); available=mem.get('MemAvailable',0); used=max(0,total-available)",
-            "st=os.statvfs('/'); disk_total=st.f_blocks*st.f_frsize; disk_free=st.f_bavail*st.f_frsize; disk_used=disk_total-disk_free",
-            "load1=os.getloadavg()[0] if hasattr(os,'getloadavg') else 0",
-            "uptime=float(open('/proc/uptime').read().split()[0])",
-            "repo='/opt/kyodobot'",
-            "branch=run('git','-C',repo,'rev-parse','--abbrev-ref','HEAD') or 'unknown'",
-            "commit=run('git','-C',repo,'rev-parse','--short','HEAD') or 'unknown'",
-            "dirty=bool(run('git','-C',repo,'status','--porcelain'))",
-            "behind=run('git','-C',repo,'rev-list','--count','HEAD..@{u}') or '0'",
-            "dash_http={'reachable':False,'statusCode':None,'latencyMs':None}",
-            "t=time.perf_counter()",
-            "for url in ('http://127.0.0.1:5000/','http://127.0.0.1:5000/live'):",
-            "    try:",
-            "        with urllib.request.urlopen(url,timeout=4) as r:",
-            "            dash_http={'reachable':200 <= r.status < 500,'statusCode':r.status,'latencyMs':round((time.perf_counter()-t)*1000)}; break",
-            "    except Exception: pass",
-            "payload={'bot':inspect('kyodobot'),'dashboard':inspect('kyodobot-dashboard'),'dashboardHttp':dash_http,'uptimeSeconds':round(uptime),'load1':round(load1,2),'memoryPercent':round((used/total*100) if total else 0),'memoryUsedMb':round(used/1024),'memoryTotalMb':round(total/1024),'diskPercent':round((disk_used/disk_total*100) if disk_total else 0),'diskUsedGb':round(disk_used/1073741824,1),'diskTotalGb':round(disk_total/1073741824,1),'branch':branch,'commit':commit,'dirty':dirty,'behind':int(behind) if behind.isdigit() else 0}",
-            "print('JULIETTE_JSON='+json.dumps(payload,separators=(',',':')))",
-            "PY",
-        ])
-        data = _parse_marked_json(output)
-        data.update({"ok": True, "available": True, "powerState": current, "checkedAt": _utc_now()})
-        return _json(req, data, request_id=request_id)
-    except HttpResponseError as exc:
-        return _json(req, {"error": "RUNTIME_STATUS_FAILED", "detail": _safe_http_detail(exc)}, getattr(exc, "status_code", None) or 502, request_id=request_id)
-    except Exception:
-        logging.exception("Runtime status failed request_id=%s", request_id)
-        return _json(req, {"error": "RUNTIME_STATUS_FAILED", "detail": "No fue posible consultar la telemetría interna de la VM."}, 502, request_id=request_id)
-
-
-@app.route(route="runtime/logs", methods=["GET", "OPTIONS"])
-def runtime_logs(req: func.HttpRequest) -> func.HttpResponse:
-    if response := _preflight_or_reject_origin(req):
-        return response
-    request_id = str(uuid.uuid4())
-    try:
-        if not _authorized(req):
-            return _json(req, {"error": "UNAUTHORIZED"}, 401, request_id=request_id)
-        try:
-            lines = max(20, min(300, int(req.params.get("lines", "120"))))
-        except ValueError:
-            lines = 120
-        output = _run_shell([
-            f"echo '=== kyodobot (últimas {lines} líneas) ==='",
-            f"docker logs kyodobot --tail {lines} 2>&1 || true",
-            "echo '=== dashboard (últimas 60 líneas) ==='",
-            "docker logs kyodobot-dashboard --tail 60 2>&1 || true",
-        ])
-        _write_audit(req, "runtime.logs", f"Consultó {lines} líneas de logs")
-        return _json(req, {"ok": True, "logs": output[-50000:], "checkedAt": _utc_now()}, request_id=request_id)
-    except Exception:
-        logging.exception("Runtime logs failed request_id=%s", request_id)
-        return _json(req, {"error": "RUNTIME_LOGS_FAILED", "detail": "No fue posible recuperar los logs."}, 502, request_id=request_id)
-
-
-@app.route(route="runtime/update", methods=["POST", "OPTIONS"])
-def runtime_update(req: func.HttpRequest) -> func.HttpResponse:
-    if response := _preflight_or_reject_origin(req):
-        return response
-    request_id = str(uuid.uuid4())
-    try:
-        if not _authorized(req):
-            return _json(req, {"error": "UNAUTHORIZED"}, 401, request_id=request_id)
-        output = _run_shell([
-            "set -e",
-            "cd /opt/kyodobot",
-            "if [ -x ./update.sh ]; then sudo ./update.sh; else echo 'update.sh no existe o no es ejecutable'; exit 12; fi",
-        ])
-        _write_audit(req, "runtime.update", "Ejecutó /opt/kyodobot/update.sh")
-        return _json(req, {"ok": True, "message": "Actualización ejecutada en la VM.", "output": output[-12000:], "completedAt": _utc_now()}, request_id=request_id)
-    except Exception as exc:
-        logging.exception("Runtime update failed request_id=%s", request_id)
-        _write_audit(req, "runtime.update", "La actualización falló", False)
-        return _json(req, {"error": "RUNTIME_UPDATE_FAILED", "detail": "La actualización remota falló. Revisa los logs."}, 502, request_id=request_id)
-
-
-@app.route(route="audit", methods=["GET", "OPTIONS"])
-def audit(req: func.HttpRequest) -> func.HttpResponse:
-    if response := _preflight_or_reject_origin(req):
-        return response
-    request_id = str(uuid.uuid4())
-    try:
-        if not _authorized(req):
-            return _json(req, {"error": "UNAUTHORIZED"}, 401, request_id=request_id)
-        try:
-            limit = max(1, min(50, int(req.params.get("limit", "20"))))
-        except ValueError:
-            limit = 20
-        entities = list(_audit_table().list_entities())
-        entities.sort(key=lambda item: str(item.get("at", "")), reverse=True)
-        items = [{"staff": e.get("staff", "Staff"), "action": e.get("action", ""), "detail": e.get("detail", ""), "ok": bool(e.get("ok", True)), "at": e.get("at", "")} for e in entities[:limit]]
-        return _json(req, {"ok": True, "items": items}, request_id=request_id)
-    except Exception:
-        logging.exception("Audit query failed request_id=%s", request_id)
-        return _json(req, {"error": "AUDIT_FAILED", "detail": "No fue posible leer la auditoría."}, 502, request_id=request_id)
