@@ -17,6 +17,6 @@ form.addEventListener('submit',async(event)=>{
     const result=await login(document.getElementById('staffName').value.trim(),document.getElementById('password').value);
     setSession(result); window.location.replace('dashboard.html');
   }catch(error){
-    errorBox.textContent=error.status===401?'Contraseña incorrecta.':'No fue posible conectar con Azure Bridge.'; errorBox.hidden=false;
+    errorBox.textContent=error.status===401?'Usuario o contraseña incorrectos.':error.status===503?'El acceso todavía no está configurado.':'No fue posible conectar con Azure Bridge.'; errorBox.hidden=false;
   }finally{button.disabled=false;button.textContent='Iniciar sesión'}
 });

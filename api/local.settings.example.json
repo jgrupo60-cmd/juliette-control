@@ -8,6 +8,7 @@
     "AZURE_VM_NAME": "kyodobot-server",
     "AZURE_VM_RESOURCE_ID": "/subscriptions/.../resourceGroups/KYODOBOT-VM/providers/Microsoft.Compute/virtualMachines/kyodobot-server",
     "ALLOWED_ORIGINS": "http://localhost:5500,https://jgrupo60-cmd.github.io",
-    "CONTROL_ACCESS_TOKEN": "replace-me"
+    "CONTROL_ACCESS_TOKEN": "replace-me",
+    "CONTROL_USERS_B64": "replace-with-base64url-users-json"
   }
 }

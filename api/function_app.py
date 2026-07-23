@@ -12,6 +12,7 @@ identity. No Azure client secret is stored in this project.
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -110,12 +111,11 @@ def _b64url_decode(value: str) -> bytes:
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
 
-def _verify_password(password: str) -> bool:
-    """Validate a password against CONTROL_LOGIN_PASSWORD_HASH.
+def _verify_password_hash(password: str, configured: str) -> bool:
+    """Validate a password against a PBKDF2-SHA256 hash.
 
     Format: pbkdf2_sha256$iterations$salt_base64url$digest_base64url
     """
-    configured = _required_setting("CONTROL_LOGIN_PASSWORD_HASH")
     try:
         algorithm, iterations_raw, salt_raw, digest_raw = configured.split("$", 3)
         if algorithm != "pbkdf2_sha256":
@@ -123,11 +123,57 @@ def _verify_password(password: str) -> bool:
         iterations = int(iterations_raw)
         salt = _b64url_decode(salt_raw)
         expected = _b64url_decode(digest_raw)
-    except (ValueError, TypeError):
-        logging.error("CONTROL_LOGIN_PASSWORD_HASH has an invalid format")
+    except (ValueError, TypeError, binascii.Error):
         return False
     actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
     return hmac.compare_digest(actual, expected)
+
+
+def _normalize_username(username: str) -> str:
+    return username.strip().casefold()
+
+
+@lru_cache(maxsize=1)
+def _configured_users() -> dict[str, dict[str, str]]:
+    """Read authorized users from CONTROL_USERS_B64.
+
+    The setting contains URL-safe base64 JSON in this form:
+    {"admin": {"displayName": "Admin", "passwordHash": "pbkdf2..."}}
+    """
+    encoded = _required_setting("CONTROL_USERS_B64")
+    try:
+        raw = _b64url_decode(encoded).decode("utf-8")
+        parsed = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError, binascii.Error) as exc:
+        raise RuntimeError("CONTROL_USERS_B64 has an invalid format") from exc
+
+    if not isinstance(parsed, dict) or not parsed:
+        raise RuntimeError("CONTROL_USERS_B64 does not contain any authorized users")
+
+    users: dict[str, dict[str, str]] = {}
+    for key, value in parsed.items():
+        if not isinstance(key, str) or not isinstance(value, dict):
+            continue
+        normalized = _normalize_username(key)
+        display_name = str(value.get("displayName", key)).strip()[:40]
+        password_hash = str(value.get("passwordHash", "")).strip()
+        if normalized and display_name and password_hash:
+            users[normalized] = {"displayName": display_name, "passwordHash": password_hash}
+
+    if not users:
+        raise RuntimeError("CONTROL_USERS_B64 does not contain valid authorized users")
+    return users
+
+
+def _verify_credentials(username: str, password: str) -> str | None:
+    normalized = _normalize_username(username)
+    user = _configured_users().get(normalized)
+    if not user:
+        hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), b"juliette-invalid", 310000)
+        return None
+    if not _verify_password_hash(password, user["passwordHash"]):
+        return None
+    return user["displayName"]
 
 
 def _issue_session(staff: str) -> tuple[str, str]:
@@ -217,11 +263,18 @@ def auth_login(req: func.HttpRequest) -> func.HttpResponse:
         body = req.get_json()
     except ValueError:
         body = {}
-    staff = str(body.get("staff", "Staff")).strip()[:40] or "Staff"
+    username = str(body.get("username", body.get("staff", ""))).strip()[:40]
     password = str(body.get("password", ""))
-    if not password or not _verify_password(password):
-        logging.warning("Rejected Control Center login request_id=%s", request_id)
-        return _json(req, {"error": "INVALID_CREDENTIALS", "detail": "Contraseña incorrecta."}, 401, request_id=request_id)
+    if not username or not password:
+        return _json(req, {"error": "INVALID_CREDENTIALS", "detail": "Usuario o contraseña incorrectos."}, 401, request_id=request_id)
+    try:
+        staff = _verify_credentials(username, password)
+    except RuntimeError:
+        logging.exception("Control Center users are not configured request_id=%s", request_id)
+        return _json(req, {"error": "AUTH_NOT_CONFIGURED", "detail": "El acceso no está configurado."}, 503, request_id=request_id)
+    if not staff:
+        logging.warning("Rejected Control Center login username=%s request_id=%s", username, request_id)
+        return _json(req, {"error": "INVALID_CREDENTIALS", "detail": "Usuario o contraseña incorrectos."}, 401, request_id=request_id)
     token, expires_at = _issue_session(staff)
     logging.info("Control Center login accepted staff=%s request_id=%s", staff, request_id)
     return _json(req, {"ok": True, "token": token, "staff": staff, "expiresAt": expires_at}, request_id=request_id)

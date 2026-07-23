@@ -40,7 +40,7 @@ export async function apiRequest(path, options = {}) {
   }catch(error){if(error.name==='AbortError')throw new Error('API_TIMEOUT');if(error instanceof TypeError)throw new Error('API_UNREACHABLE');throw error}finally{clearTimeout(timeout)}
 }
 
-export async function login(staff,password){
-  return apiRequest('/api/auth/login',{method:'POST',body:JSON.stringify({staff,password}),timeoutMs:15000});
+export async function login(username,password){
+  return apiRequest('/api/auth/login',{method:'POST',body:JSON.stringify({username,password}),timeoutMs:15000});
 }
 export async function verifySession(){ return apiRequest('/api/auth/session',{method:'GET',timeoutMs:15000}); }

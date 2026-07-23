@@ -1,0 +1,20 @@
+ARCHIVOS A REEMPLAZAR
+- api/function_app.py
+- api/local.settings.example.json
+- login.html
+- assets/js/login.js
+- services/api.js
+- scripts/set-control-user.ps1 (nuevo)
+
+También puedes eliminar scripts/set-login-password.ps1 porque ya no se utiliza.
+
+ORDEN DE DESPLIEGUE
+1. Reemplaza los archivos en el repositorio.
+2. Publica Azure Functions con scripts/deploy-pr004.ps1.
+3. Crea el primer usuario:
+   .\scripts\set-control-user.ps1 -Username "Admin" -DisplayName "Admin"
+4. Agrega otros usuarios repitiendo el comando con otro nombre.
+5. Sube los cambios a GitHub.
+
+ELIMINAR UN USUARIO
+.\scripts\set-control-user.ps1 -Username "usuario" -Remove
